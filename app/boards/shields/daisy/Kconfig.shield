@@ -1,0 +1,20 @@
+# Copyright (c) 2022 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+config SHIELD_DAISY_BASE
+    bool
+
+config SHIELD_DAISY
+    def_bool $(shields_list_contains,daisy)
+    select SHIELD_DAISY_BASE
+
+config SHIELD_DAISY_SPLIT_LEFT
+    def_bool $(shields_list_contains,daisy_split_left)
+    select SHIELD_DAISY_BASE
+    select ZMK_SPLIT
+    select ZMK_SPLIT_ROLE_CENTRAL
+
+config SHIELD_DAISY_SPLIT_RIGHT
+    def_bool $(shields_list_contains,daisy_split_right)
+    select SHIELD_DAISY_BASE
+    select ZMK_SPLIT
