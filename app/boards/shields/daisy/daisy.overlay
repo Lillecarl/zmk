@@ -15,15 +15,6 @@
         zmk,physical-layout = &matrix_physical_layout;
     };
 
-    sensors: sensors {
-        compatible = "zmk,keymap-sensors";
-        sensors = <&encoder>;
-        triggers-per-rotation = <20>;
-        left {
-            triggers-per-rotation = <20>;
-        };
-    };
-
     macros {
         ZMK_MACRO(ble_zero,
             wait-ms = <1>;

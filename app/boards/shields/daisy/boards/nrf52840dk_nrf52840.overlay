@@ -23,16 +23,6 @@
     };
 };
 
-// Set up the QDEC hardware based driver and give it the same label as the deleted node.
-encoder: &qdec0 {
-    status = "okay";
-    led-pre = <0>;
-    steps = <80>;
-    pinctrl-0 = <&qdec_default>;
-    pinctrl-1 = <&qdec_sleep>;
-    pinctrl-names = "default", "sleep";
-};
-
 / {
     behaviors {
         hw_soft_off: hw_soft_off {

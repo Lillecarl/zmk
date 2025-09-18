@@ -129,13 +129,6 @@ nice_view_spi: &arduino_spi {
         , <&arduino_header 2 GPIO_ACTIVE_LOW>
         ;
     };
-
-    encoder: encoder {
-        steps = <80>;
-        compatible = "alps,ec11";
-        a-gpios = <&arduino_header 15 GPIO_PULL_UP>;
-        b-gpios = <&arduino_header 14 GPIO_PULL_UP>;
-    };
 };
 
 &matrix_physical_layout {
