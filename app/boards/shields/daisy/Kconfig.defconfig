@@ -4,7 +4,7 @@
 if SHIELD_DAISY_BASE
 
 config ZMK_KEYBOARD_NAME
-    default "ZMK Uno"
+    default "Flower Daisy"
 
 config ZMK_PM_SOFT_OFF
     default y if BOARD_NRF52840DK_NRF52840
