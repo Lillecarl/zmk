@@ -1,6 +1,6 @@
 file_format: "1"
 id: daisy
-name: ZMK Uno
+name: Daisy
 type: shield
 url: https://github.com/zmkfirmware/daisy
 requires: [arduino_uno]
