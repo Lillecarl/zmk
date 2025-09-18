@@ -13,59 +13,7 @@
     status = "okay";
 };
 
-nice_view_spi: &arduino_spi {
-    status = "okay";
-
-    cs-gpios = <&arduino_header 16 GPIO_ACTIVE_HIGH>;
-
-    // Needed so the nice_view shield will enhance the existing node which falls *first*
-    // on the bus, properly picking up the first `cs-gpios` specifier.
-    ls0xx@0 {
-        reg = <0>;
-    };
-
-    led_strip: ws2812@0 {
-        compatible = "worldsemi,ws2812-spi";
-
-        /* SPI */
-        reg = <0>; /* ignored, but necessary for SPI bindings */
-        spi-max-frequency = <4000000>;
-
-        /* WS2812 */
-        chain-length = <7>; /* 4 underglow + 3 per-key LEDs */
-        spi-one-frame = <0x70>;
-        spi-zero-frame = <0x40>;
-
-        color-mapping = <LED_COLOR_ID_GREEN LED_COLOR_ID_RED LED_COLOR_ID_BLUE>;
-    };
-};
-
 / {
-    chosen {
-        zmk,backlight = &backlight;
-        zmk,underglow = &led_strip;
-    };
-
-    // Commented out until we add more powerful power domain support
-    // external_power {
-        //  compatible = "zmk,ext-power-generic";
-        //  init-delay-ms = <200>;
-        //  control-gpios = <&arduino_header 1 GPIO_ACTIVE_LOW>;
-    // };
-
-    rgb_power {
-        compatible = "zmk,ext-power-generic";
-        init-delay-ms = <200>;
-        control-gpios = <&arduino_header 1 GPIO_ACTIVE_LOW>;
-    };
-
-    backlight: gpioleds {
-        compatible = "gpio-leds";
-        gpio_led_0 {
-            gpios = <&arduino_header 12 GPIO_ACTIVE_HIGH>;
-        };
-    };
-
     matrix_transform: matrix_transform {
         compatible = "zmk,matrix-transform";
         rows = <3>;
