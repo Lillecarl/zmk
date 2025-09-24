@@ -4,25 +4,6 @@
     /delete-node/ encoder;
 };
 
-&pinctrl {
-    qdec_default: qdec_default {
-        group1 {
-            psels = <NRF_PSEL(QDEC_A, 1, 11)>,
-                    <NRF_PSEL(QDEC_B, 1, 10)>;
-            bias-pull-up;
-        };
-    };
-
-    qdec_sleep: qdec_sleep {
-        group1 {
-            psels = <NRF_PSEL(QDEC_A, 1, 11)>,
-                    <NRF_PSEL(QDEC_B, 1, 10)>;
-            bias-pull-up;
-            low-power-enable;
-        };
-    };
-};
-
 / {
     behaviors {
         hw_soft_off: hw_soft_off {
