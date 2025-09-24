@@ -37,36 +37,39 @@
 
         diode-direction = "col2row";
 
+	// UART on DK: P0.05, P0.06, P0.07, and P0.08
+	// NFC on DK: P0.09 and P0.10
+	// Buttons and LEDs on DK: P0.11–P0.16 and P0.24–P0.25
         col-gpios
         = <&gpio0  2 GPIO_ACTIVE_HIGH> // KSO0
         , <&gpio0  3 GPIO_ACTIVE_HIGH> // KSO1
         , <&gpio0  4 GPIO_ACTIVE_HIGH> // KSO2
-        , <&gpio0  5 GPIO_ACTIVE_HIGH> // KSO3
-        , <&gpio0  7 GPIO_ACTIVE_HIGH> // KSO4
-        , <&gpio0  9 GPIO_ACTIVE_HIGH> // KSO5
-        , <&gpio0 10 GPIO_ACTIVE_HIGH> // KSO6
-        , <&gpio0 11 GPIO_ACTIVE_HIGH> // KSO7
-        , <&gpio0 12 GPIO_ACTIVE_HIGH> // KSO8
-        , <&gpio0 16 GPIO_ACTIVE_HIGH> // KSO9
-        , <&gpio0 17 GPIO_ACTIVE_HIGH> // KS10
-        , <&gpio0 19 GPIO_ACTIVE_HIGH> // KS11
-        , <&gpio0 20 GPIO_ACTIVE_HIGH> // KS12
-        , <&gpio0 21 GPIO_ACTIVE_HIGH> // KS13
-        , <&gpio0 22 GPIO_ACTIVE_HIGH> // KS14
-        , <&gpio0 23 GPIO_ACTIVE_HIGH> // KS15
-        , <&gpio0 24 GPIO_ACTIVE_HIGH> // KS16
-        , <&gpio0 25 GPIO_ACTIVE_HIGH> // KS17
+        , <&gpio0  5 GPIO_ACTIVE_HIGH> // KSO3 UART
+        , <&gpio0  7 GPIO_ACTIVE_HIGH> // KSO4 UART
+        , <&gpio0  9 GPIO_ACTIVE_HIGH> // KSO5 NFC
+        , <&gpio0 10 GPIO_ACTIVE_HIGH> // KSO6 NFC
+        , <&gpio0 11 GPIO_ACTIVE_HIGH> // KSO7 Button 1
+        , <&gpio0 12 GPIO_ACTIVE_HIGH> // KSO8 Button 2
+        , <&gpio0 16 GPIO_ACTIVE_HIGH> // KSO9 LED 4
+        , <&gpio0 17 GPIO_ACTIVE_HIGH> // KS10 QSPI CS
+        , <&gpio0 19 GPIO_ACTIVE_HIGH> // KS11 QSPI SCLK
+        , <&gpio0 20 GPIO_ACTIVE_HIGH> // KS12 QSPI_DIO0
+        , <&gpio0 21 GPIO_ACTIVE_HIGH> // KS13 QSPI_DIO1
+        , <&gpio0 22 GPIO_ACTIVE_HIGH> // KS14 QSPI_DIO2
+        , <&gpio0 23 GPIO_ACTIVE_HIGH> // KS15 QSPI_DIO3
+        , <&gpio0 24 GPIO_ACTIVE_HIGH> // KS16 Button 3
+        , <&gpio0 25 GPIO_ACTIVE_HIGH> // KS17 Button 4
         ;
 
         row-gpios
-        = <&gpio1  0 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI0
+        = <&gpio1  0 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI0 TRACEDATA[0]
         , <&gpio1  3 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI1
         , <&gpio1  4 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI2
         , <&gpio1  5 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI3
         , <&gpio1  6 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI4
         , <&gpio1  7 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI5
         , <&gpio1  8 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI6
-        , <&gpio1  9 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI7
+        , <&gpio1  9 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI7 TRACEDATA[3]
         ;
 
         // And direct GPIO
