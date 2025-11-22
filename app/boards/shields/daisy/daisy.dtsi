@@ -137,22 +137,8 @@ zephyr_udc0: &usbd {
         ;
     };
 
-    /**
-      * RGB LEDs for charge indication
-      * No pull-downs on PCB, so enable them here.
-      */
     leds {
         compatible = "gpio-leds";
-	// TODO: On nRF52840 DK should leave led 0-2 on the original GPIO assignments
-        red_led: led_0 {
-            gpios = <&gpio1 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
-        };
-        green_led: led_1 {
-            gpios = <&gpio1 11 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
-        };
-        blue_led: led_2 {
-            gpios = <&gpio1 12 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
-        };
 	/* Capslock LED on keyboard membrane. Has pulldown on main PCB */
         caps_led: led_3 {
             gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>;
