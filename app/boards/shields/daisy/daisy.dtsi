@@ -153,6 +153,10 @@ zephyr_udc0: &usbd {
         blue_led: led_2 {
             gpios = <&gpio1 12 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
         };
+	/* Capslock LED on keyboard membrane. Has pulldown on main PCB */
+        caps_led: led_3 {
+            gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>;
+        };
     };
 };
 
