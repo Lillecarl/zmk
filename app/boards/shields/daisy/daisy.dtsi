@@ -8,7 +8,7 @@
 #include <dt-bindings/zmk/matrix_transform.h>
 #include "daisy-layouts.dtsi"
 
-&i2c0 {
+&i2c1 {
     status = "okay";
 
     touchpad: touchpad@2c {
