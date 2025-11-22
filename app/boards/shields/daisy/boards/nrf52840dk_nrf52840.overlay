@@ -41,3 +41,25 @@
         wakeup-sources = <&soft_off_direct_kscan>;
     };
 };
+
+&i2c1 {
+    status = "okay";
+
+    touchpad: touchpad@2c {
+        compatible = "zmk,hid-touchpad";
+        status = "okay";
+        reg = <0x2c>;
+        dr-gpios = <&gpio0 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+        // Instead of parsing the HID report descriptor in firmware
+        // We configure the report IDs and report structure here
+        // PCT1036
+        mouse-report-id = <1>;
+        inputmode-report-id = <3>;
+        relative-x-off = <4>;
+        relative-x-len = <1>;
+        relative-y-off = <5>;
+        relative-y-len = <1>;
+        button-off = <3>;
+        button-bit = <0>;
+    };
+};
