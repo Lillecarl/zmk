@@ -57,7 +57,12 @@
 		button0: button_0 {
 			gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
 			label = "Pairing Button";
-			zephyr,code = <INPUT_KEY_0>;
+			zephyr,code = <INPUT_BTN_SELECT>;
+		};
+		button1: button_1 {
+			gpios = <&gpio1 14 GPIO_ACTIVE_LOW>;
+			label = "Mode Switch";
+			zephyr,code = <INPUT_BTN_MODE>;
 		};
 	};
 
