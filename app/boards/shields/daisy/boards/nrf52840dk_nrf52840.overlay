@@ -1,7 +1,13 @@
-
 / {
     // First, delete the existing basic GPIO based instance.
     /delete-node/ encoder;
+    // Delete led3 which we don't use
+    leds {
+        /delete-node/ led_3;
+    };
+    aliases {
+        /delete-property/ led3;
+    };
 };
 
 / {
