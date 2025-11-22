@@ -52,11 +52,12 @@ zephyr_udc0: &usbd {
     };
     matrix_transform: matrix_transform {
         compatible = "zmk,matrix-transform";
-        rows = <8>;
+        rows = <9>;
         columns = <18>;
 
         // (row, col)
         map = <
+        RC(8, 0) RC(8, 1)
         RC(1,1)  RC(0,2)  RC(3,2)  RC(2,2)  RC(1,2)  RC(4,4)  RC(2,4)  RC(1,4)  RC(2,11) RC(1,9)  RC(0,4)  RC(0,1)  RC(1,5)  RC(2,9)
         RC(3,1)  RC(5,1)  RC(6,4)  RC(6,2)  RC(6,3)  RC(3,3)  RC(3,8)  RC(6,8)  RC(6,5)  RC(6,9)  RC(6,6)  RC(3,6)  RC(0,8)  RC(1,11)
         RC(2,1)  RC(7,5)  RC(7,6)  RC(7,8)  RC(7,9)  RC(2,3)  RC(2,6)  RC(7,1)  RC(7,2) RC(7,3)   RC(7,4)  RC(2,8)  RC(2,5)  RC(3,11)
@@ -67,7 +68,34 @@ zephyr_udc0: &usbd {
         >;
     };
 
-    kscan_matrix: kscan_matrix {
+    kscan0: kscan_composite {
+        compatible = "zmk,kscan-composite";
+        rows = <9>;
+        columns = <18>;
+
+        direct {
+            kscan = <&button_switches_kscan>;
+	    // Shift it after the keyboard scan
+            row-offset = <8>;
+        };
+
+        matrix {
+            kscan = <&kscan1>;
+        };
+    };
+
+    button_switches_kscan: kscan_direct {
+        compatible = "zmk,kscan-gpio-direct";
+        wakeup-source;
+        input-gpios
+            // Has external pullup on PCB
+            = <&gpio1 13 (GPIO_ACTIVE_LOW)>
+	    // Bistable switch with low and high position
+            , <&gpio1 14 (GPIO_ACTIVE_LOW)>
+            ;
+    };
+
+    kscan1: kscan_matrix {
         compatible = "zmk,kscan-gpio-matrix";
         wakeup-source;
 
@@ -107,11 +135,6 @@ zephyr_udc0: &usbd {
         , <&gpio1  8 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI6
         , <&gpio1  9 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI7 TRACEDATA[3]
         ;
-
-        // And direct GPIO
-        // gpio1 13 pairing button
-        // gpio1 14 mode switch button
-
     };
 
     /**
@@ -134,6 +157,6 @@ zephyr_udc0: &usbd {
 };
 
 &matrix_physical_layout {
-    kscan = <&kscan_matrix>;
+    kscan = <&kscan0>;
     transform = <&matrix_transform>;
 };
