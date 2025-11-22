@@ -1,0 +1,8 @@
+# Daisy board configuration
+
+# Copyright (c) 2016 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_DAISY
+	bool "Daisy"
+	depends on SOC_NRF52840_QIAA
