@@ -12,7 +12,7 @@ zephyr_udc0: &usbd {
     status = "okay";
 };
 
-&arduino_i2c {
+&i2c0 {
     status = "okay";
 
     touchpad: touchpad@2c {

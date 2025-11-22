@@ -6,5 +6,4 @@ arch: arm
 outputs:
   - usb
   - ble
-url: https://www.nordicsemi.com/Products/Development-hardware/nrf52840-dk
-exposes: [arduino_uno]
+url: https://example.com/daisy
