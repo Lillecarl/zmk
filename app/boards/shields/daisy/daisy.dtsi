@@ -8,10 +8,6 @@
 #include <dt-bindings/zmk/matrix_transform.h>
 #include "daisy-layouts.dtsi"
 
-zephyr_udc0: &usbd {
-    status = "okay";
-};
-
 &i2c0 {
     status = "okay";
 
