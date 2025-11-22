@@ -216,7 +216,7 @@
 };
 
 &ieee802154 {
-	status = "okay";
+	status = "disabled";
 };
 
 &flash0 {
