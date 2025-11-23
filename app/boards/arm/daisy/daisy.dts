@@ -7,6 +7,7 @@
 /dts-v1/;
 #include <nordic/nrf52840_qiaa.dtsi>
 #include "daisy-pinctrl.dtsi"
+#include <dt-bindings/regulator/npm1300.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 
 / {
@@ -120,10 +121,22 @@
 	pinctrl-1 = <&i2c0_sleep>;
 	pinctrl-names = "default", "sleep";
 
-	npm1300: npm1300@6b {
-		compatible = "i2c-device";
+	// npm1300: npm1300@6b {
+	// 	compatible = "i2c-device";
+	// 	reg = <0x6b>;
+	// 	status = "okay";
+	// };
+
+	npm1300: pmic@6b {
+		compatible = "nordic,npm1300";
 		reg = <0x6b>;
-		status = "okay";
+
+		npm1300_ek_leds: leds {
+			compatible = "nordic,npm1300-led";
+			nordic,led0-mode = "host";
+			nordic,led1-mode = "host";
+			nordic,led2-mode = "host";
+		};
 	};
 };
 
