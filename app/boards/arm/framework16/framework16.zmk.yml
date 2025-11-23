@@ -1,0 +1,10 @@
+file_format: "1"
+id: framework16
+name: Framework 16
+type: board
+arch: arm
+features:
+  - keys
+outputs:
+  - usb
+url: https://frame.work/laptop16
