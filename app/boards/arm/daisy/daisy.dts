@@ -36,13 +36,14 @@
 		    gpios = <&gpio1 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
 		    label = "Red LED";
 		};
-		green_led: led_1 {
+		// I think the schematic has them labeled wrong
+		blue_led: led_1 {
 		    gpios = <&gpio1 11 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
-		    label = "Green LED";
-		};
-		blue_led: led_2 {
-		    gpios = <&gpio1 12 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
 		    label = "Blue LED";
+		};
+		green_led: led_2 {
+		    gpios = <&gpio1 12 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+		    label = "Green LED";
 		};
 	};
 
