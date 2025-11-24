@@ -6,6 +6,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/sys_io.h>
+#include <zmk/backlight.h>
 
 int startup(void)
 {
@@ -22,6 +23,10 @@ int startup(void)
 	/* TODO: To avoid waking the system, keyboard scan should be disabled
 	 * if lid is closed
 	 **/
+
+	/* Turn backlight brightness to 100% */
+	zmk_backlight_on();
+	zmk_backlight_set_brt(100);
 
 	return 0;
 }

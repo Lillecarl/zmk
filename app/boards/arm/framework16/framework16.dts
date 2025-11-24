@@ -36,12 +36,11 @@
         };
     };
 
-    pwmleds {
+    backlight_pwm: pwmleds {
         compatible = "pwm-leds";
         status = "okay";
-        backlight_pwm: pwm_led_0 {
-            /* GPIO25 */
-            pwms = <&pwm 9 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
+        pwm_led_0 {
+            pwms = <&pwm 9 PWM_NSEC(1000) PWM_POLARITY_NORMAL>;
             label = "Backlight";
         };
     };
