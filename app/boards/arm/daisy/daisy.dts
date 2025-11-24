@@ -258,3 +258,11 @@ zephyr_udc0: &usbd {
 	compatible = "nordic,nrf-usbd";
 	status = "okay";
 };
+
+
+&uicr {
+	// Use 	P0.09 and P0.10 as GPIO for KSO instead of NFC
+	nfct-pins-as-gpios;
+	// Use P0.18 as nRESET
+	gpio-as-nreset;
+};
