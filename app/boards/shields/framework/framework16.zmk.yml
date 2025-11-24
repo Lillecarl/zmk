@@ -1,0 +1,9 @@
+file_format: "1"
+id: framework16_ansi
+name: Framework Lapotp 16 - ANSI Keyboard
+type: shield
+url: https://frame.work/laptop16
+requires: []
+features:
+  - keys
+  - studio

@@ -1,0 +1,13 @@
+# Copyright (c) 2025 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+if SHIELD_FRAMEWORK16_ANSI
+
+config ZMK_KEYBOARD_NAME
+    default "Framework Laptop 16 - ANSI Keyboard"
+
+config ZMK_BACKLIGHT
+    select LED
+    select LED_PWM
+
+endif

@@ -1,0 +1,9 @@
+# Copyright (c) 2025 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+config SHIELD_FRAMEWORK16_ANSI
+    def_bool $(shields_list_contains,framework16_ansi)
+
+config SHIELD_FRAMEWORK16_MACROPAD
+    def_bool $(shields_list_contains,framework16_numpad)
+
