@@ -138,6 +138,20 @@
 			nordic,led1-mode = "host";
 			nordic,led2-mode = "host";
 		};
+
+		npm1300_regulators: regulators {
+			compatible = "nordic,npm1300-regulator";
+			npm1300_buck1: BUCK1 {
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-boot-on;
+			};
+			npm1300_buck2: BUCK2 {
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-boot-on;
+			};
+		};
 	};
 };
 
