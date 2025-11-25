@@ -37,6 +37,55 @@ ZMK_SUBSCRIPTION(daisy_leds, zmk_usb_conn_state_changed);
 ZMK_SUBSCRIPTION(daisy_leds, zmk_ble_active_profile_changed);
 #endif
 
+struct led_blink_context {
+    struct k_work_delayable blink_work;
+    uint32_t led_idx;
+    bool is_on;
+    uint32_t interval_ms;
+};
+static struct led_blink_context led_ctx;
+
+static void led_blink_handler(struct k_work *work)
+{
+    struct k_work_delayable *dwork = k_work_delayable_from_work(work);
+    struct led_blink_context *ctx = CONTAINER_OF(dwork, struct led_blink_context, blink_work);
+
+    ctx->is_on = !ctx->is_on;
+
+    if (ctx->is_on) {
+        led_on(pmic_leds, ctx->led_idx);
+    } else {
+        led_off(pmic_leds, ctx->led_idx);
+    }
+
+    /* Blink again after timeout */
+    k_work_reschedule(&ctx->blink_work, K_MSEC(ctx->interval_ms));
+}
+
+void start_blinking_led(uint32_t led_idx, uint32_t period_ms)
+{
+    if (!device_is_ready(pmic_leds)) {
+        printk("LED device not ready\n");
+        return;
+    }
+
+    led_ctx.led_idx = led_idx;
+    led_ctx.interval_ms = period_ms / 2; // On for half, off for half
+    led_ctx.is_on = false;
+
+    k_work_init_delayable(&led_ctx.blink_work, led_blink_handler);
+    k_work_reschedule(&led_ctx.blink_work, K_NO_WAIT);
+}
+
+void stop_blinking_led(void)
+{
+    /* Cancel any pending work */
+    k_work_cancel_delayable(&led_ctx.blink_work);
+
+    /* Ensure LED is off */
+    led_off(pmic_leds, led_ctx.led_idx);
+}
+
 static int daisy_leds_update_listener(const zmk_event_t *eh)
 {
 	struct zmk_endpoint_changed *ep_changed = as_zmk_endpoint_changed(eh);
@@ -72,17 +121,21 @@ static int daisy_leds_update_listener(const zmk_event_t *eh)
 		printk("zoid: BLE Active Profile Index: %d\n", zmk_ble_active_profile_index());
 		printk("zoid: BLE Active Profile Conn:  %d\n", zmk_ble_active_profile_is_connected());
 		printk("zoid: BLE Active Profile Open:  %d\n", zmk_ble_active_profile_is_open());
+		/* Stop all blinking */
+		stop_blinking_led();
 		for (int i = 0; i < 3; i++) {
-			if (i == zmk_ble_active_profile_index()) {
-				if (zmk_ble_active_profile_is_connected()) {
-					led_on(pmic_leds, i);
-				} else {
-					// TODO: Not blinking
-					// led_blink(pmic_leds, i, 100, 1000);
-					led_off(pmic_leds, i);
-				}
-			} else {
+			if (i != zmk_ble_active_profile_index()) {
+				/* Turn LEDs of not active profiles off */
 				led_off(pmic_leds, i);
+			} else if (zmk_ble_active_profile_is_connected()) {
+				/* Paired and connected, solid on */
+				led_on(pmic_leds, i);
+			} else if (zmk_ble_active_profile_is_open()) {
+				/* Fast blink if nothing paired */
+				start_blinking_led(i, 700);
+			} else {
+				/* Slow blink if paired but not connected */
+				start_blinking_led(i, 1400);
 			}
 		}
 	}
@@ -123,9 +176,9 @@ static void input_cb(struct input_event *evt)
 	switch (evt->code) {
 	case INPUT_BTN_SELECT:
 		printk("daisy: Pressed pairing button - %d\n", evt->value);
-		// Short press selects the next profile
-		// TODO: This breaks the USB shell - why? Debug with UART
-		// zmk_ble_prof_next();
+		// Short press selects the next profile on button up event
+		if (evt->value == 0)
+			zmk_ble_prof_next();
 		// TODO: Long press should repair the current profile
 		break;
 	case INPUT_BTN_MODE:
