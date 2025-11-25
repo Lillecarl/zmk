@@ -44,3 +44,6 @@ CONFIG_LED=y
 # Only allow 3 profiles (3 LED indicators)
 CONFIG_BT_MAX_CONN=3
 CONFIG_BT_MAX_PAIRED=3
+# Increase stack size, otherwise crashes when pressing pairing button to switch
+# bluetooth profiles
+CONFIG_INPUT_THREAD_STACK_SIZE=2048
