@@ -19,11 +19,20 @@
 #include <zmk/ble.h>
 #include <zmk/endpoints.h>
 #include <zmk/endpoints_types.h>
+#include <zmk/behavior.h>
+#include <drivers/behavior.h>
+
+#define DT_DRV_COMPAT zmk_behavior_led_trigger
+#if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
 static const struct device *pmic_leds = DEVICE_DT_GET(DT_NODELABEL(npm1300_ek_leds));
 static const struct gpio_dt_spec red_led = GPIO_DT_SPEC_GET(DT_NODELABEL(red_led), gpios);
 static const struct gpio_dt_spec green_led = GPIO_DT_SPEC_GET(DT_NODELABEL(green_led), gpios);
 static const struct gpio_dt_spec blue_led = GPIO_DT_SPEC_GET(DT_NODELABEL(blue_led), gpios);
+static const struct gpio_dt_spec protocol_switch = GPIO_DT_SPEC_GET(DT_NODELABEL(protocol_switch), gpios);
+
+/* State of the protocol switch (BLE or USB). 1 if set to USB */
+static int protocol_switch_usb;
 
 static int daisy_leds_update_listener(const zmk_event_t *eh);
 ZMK_LISTENER(daisy_leds, daisy_leds_update_listener);
@@ -86,6 +95,67 @@ void stop_blinking_led(void)
     led_off(pmic_leds, led_ctx.led_idx);
 }
 
+void update_power_led(void)
+{
+	// | Power Level   | Plugged in | Color |
+	// | <  10%        | No         | Red   |
+	// | >= 10%        | No         | Off   |
+	// | <  90%        | Yes        | Amber |
+	// | >= 90%        | Yes        | White |
+	if (zmk_usb_get_conn_state() == ZMK_USB_CONN_HID) {
+		// White - Compter connected
+		gpio_pin_set_dt(&red_led, 1);
+		gpio_pin_set_dt(&green_led, 1);
+		gpio_pin_set_dt(&blue_led, 1);
+	} else if (zmk_usb_get_conn_state() == ZMK_USB_CONN_POWERED) {
+		// Yellow - No Computer, but USB connected (e.g. charger)
+		gpio_pin_set_dt(&red_led, 1);
+		gpio_pin_set_dt(&green_led, 1);
+		gpio_pin_set_dt(&blue_led, 0);
+	} else if (zmk_usb_get_conn_state() == ZMK_USB_CONN_NONE) {
+		// Red - Battery connected, no USB
+		gpio_pin_set_dt(&red_led, 1);
+		gpio_pin_set_dt(&green_led, 0);
+		gpio_pin_set_dt(&blue_led, 0);
+	} else {
+		printk("daisy: ERROR! Unexpected state *\n");
+	}
+}
+
+void update_ble_leds(void)
+{
+	printk("daisy: update_ble_leds: %s\n", protocol_switch_usb ? "USB" : "BLE");
+	/* Stop all blinking and turn all LEDs off. Start clean */
+	stop_blinking_led();
+	for (int i = 0; i < 3; i++) {
+		led_off(pmic_leds, i);
+	}
+
+	/* Check the switch status not the currently selected transport.
+	 * Because bluetooth transport is selected only if we have an active
+	 * profile. If it's not set to BLE, we don't have to show any pairing
+	 * LEDs. */
+	protocol_switch_usb = gpio_pin_get_dt(&protocol_switch);
+	if (protocol_switch_usb)
+		return;
+
+	for (int i = 0; i < 3; i++) {
+		if (i != zmk_ble_active_profile_index()) {
+			/* Turn LEDs of not active profiles off */
+			led_off(pmic_leds, i);
+		} else if (zmk_ble_active_profile_is_connected()) {
+			/* Paired and connected, solid on */
+			led_on(pmic_leds, i);
+		} else if (zmk_ble_active_profile_is_open()) {
+			/* Fast blink if nothing paired */
+			start_blinking_led(i, 700);
+		} else {
+			/* Slow blink if paired but not connected */
+			start_blinking_led(i, 1400);
+		}
+	}
+}
+
 static int daisy_leds_update_listener(const zmk_event_t *eh)
 {
 	struct zmk_endpoint_changed *ep_changed = as_zmk_endpoint_changed(eh);
@@ -98,22 +168,7 @@ static int daisy_leds_update_listener(const zmk_event_t *eh)
 		printk("zoid: zmk_usb_is_powered: %d\n", zmk_usb_is_powered());
 		printk("zoid: zmk_usb_get_status: %d\n", zmk_usb_get_status());
 		printk("zoid: zmk_usb_get_conn_state: %d\n", zmk_usb_get_conn_state());
-		if (zmk_usb_get_conn_state() == ZMK_USB_CONN_HID) {
-			// White - Compter connected
-			gpio_pin_set_dt(&red_led, 1);
-			gpio_pin_set_dt(&green_led, 1);
-			gpio_pin_set_dt(&blue_led, 1);
-		} else if (zmk_usb_get_conn_state() == ZMK_USB_CONN_POWERED) {
-			// Yellow - No Computer, but USB connected (e.g. charger)
-			gpio_pin_set_dt(&red_led, 1);
-			gpio_pin_set_dt(&green_led, 1);
-			gpio_pin_set_dt(&blue_led, 0);
-		} else if (zmk_usb_get_conn_state() == ZMK_USB_CONN_NONE) {
-			// Red - Battery connected, no USB
-			gpio_pin_set_dt(&red_led, 1);
-			gpio_pin_set_dt(&green_led, 1);
-			gpio_pin_set_dt(&blue_led, 0);
-		}
+		update_power_led();
 	}
 
 	if (ble_changed) {
@@ -121,23 +176,7 @@ static int daisy_leds_update_listener(const zmk_event_t *eh)
 		printk("zoid: BLE Active Profile Index: %d\n", zmk_ble_active_profile_index());
 		printk("zoid: BLE Active Profile Conn:  %d\n", zmk_ble_active_profile_is_connected());
 		printk("zoid: BLE Active Profile Open:  %d\n", zmk_ble_active_profile_is_open());
-		/* Stop all blinking */
-		stop_blinking_led();
-		for (int i = 0; i < 3; i++) {
-			if (i != zmk_ble_active_profile_index()) {
-				/* Turn LEDs of not active profiles off */
-				led_off(pmic_leds, i);
-			} else if (zmk_ble_active_profile_is_connected()) {
-				/* Paired and connected, solid on */
-				led_on(pmic_leds, i);
-			} else if (zmk_ble_active_profile_is_open()) {
-				/* Fast blink if nothing paired */
-				start_blinking_led(i, 700);
-			} else {
-				/* Slow blink if paired but not connected */
-				start_blinking_led(i, 1400);
-			}
-		}
+		update_ble_leds();
 	}
 	if (bat_changed) {
 		printk("zoid: battery_state_changed\n");
@@ -159,42 +198,12 @@ static int daisy_leds_update_listener(const zmk_event_t *eh)
 			printk("zoid: endpoint.ble.profile_index: %d\n", ep_changed->endpoint.ble.profile_index);
 			// zmk_ble_active_profile_changed doesn't get called
 			// So we have to manually enable the LED again
-			led_on(pmic_leds, ep_changed->endpoint.ble.profile_index);
+			update_ble_leds();
 		}
 	}
 
 	return 0;
 }
-
-static void input_cb(struct input_event *evt)
-{
-	/* Ignore unrelated events */
-	if (evt->type != INPUT_EV_KEY) {
-		return;
-	}
-
-	switch (evt->code) {
-	case INPUT_BTN_SELECT:
-		printk("daisy: Pressed pairing button - %d\n", evt->value);
-		// Short press selects the next profile on button up event
-		if (evt->value == 0)
-			zmk_ble_prof_next();
-		// TODO: Long press should repair the current profile
-		break;
-	case INPUT_BTN_MODE:
-		printk("daisy: Changed mode switch - %d. Current transport: %d\n", evt->value, zmk_endpoints_selected().transport);
-		if (evt->value)
-			zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
-		else
-			zmk_endpoints_select_transport(ZMK_TRANSPORT_BLE);
-		break;
-	default:
-		printk("Unrecognized input code %u value %d\n",
-			evt->code, evt->value);
-		return;
-	}
-}
-INPUT_CALLBACK_DEFINE(NULL, input_cb);
 
 int led_init(void)
 {
@@ -202,11 +211,6 @@ int led_init(void)
 		printk("Error: led device is not ready\n");
 		return 0;
 	}
-
-	/* Turn all BLE LEDs off on boot */
-	led_off(pmic_leds, 0U);
-	led_off(pmic_leds, 1U);
-	led_off(pmic_leds, 2U);
 
 	if (!gpio_is_ready_dt(&red_led)) {
 		return 0;
@@ -221,11 +225,51 @@ int led_init(void)
 	gpio_pin_configure_dt(&green_led, GPIO_OUTPUT_ACTIVE);
 	gpio_pin_configure_dt(&blue_led, GPIO_OUTPUT_ACTIVE);
 
-	/* Turn all the power LEDs off on boot */
-	gpio_pin_set_dt(&red_led, 0);
-	gpio_pin_set_dt(&green_led, 0);
-	gpio_pin_set_dt(&blue_led, 0);
+	protocol_switch_usb = gpio_pin_get_dt(&protocol_switch);
+	printk("daisy: Protocol switch on boot: %s\n",
+			protocol_switch_usb ? "USB" : "BLE");
+	if (protocol_switch_usb)
+		zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
+	else
+		zmk_endpoints_select_transport(ZMK_TRANSPORT_BLE);
+
+	/* Initialize the status LEDs */
+	update_power_led();
+	update_ble_leds();
 
 	return 0;
 }
 SYS_INIT(led_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+
+static int on_led_binding_pressed(struct zmk_behavior_binding *binding, struct zmk_behavior_binding_event event)
+{
+	protocol_switch_usb = binding->param1;
+	printk("daisy: Changed mode switch behavior %d. Current transport: %d\n", protocol_switch_usb, zmk_endpoints_selected().transport);
+
+	if (protocol_switch_usb)
+		zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
+	else
+		zmk_endpoints_select_transport(ZMK_TRANSPORT_BLE);
+
+	/* If we booted in BLE mode without any device connected, the
+	 * transport is USB. So switching the switch to USB does not
+	 * trigger a transport change. So we need to make sure the LEDs
+	 * are correct here. */
+	update_ble_leds();
+
+	return ZMK_BEHAVIOR_OPAQUE;
+}
+
+/* Define the behavior driver API */
+static const struct behavior_driver_api behavior_led_driver_api = {
+    .binding_pressed = on_led_binding_pressed,
+    .locality = BEHAVIOR_LOCALITY_EVENT_SOURCE,
+#if IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
+    .get_parameter_metadata = zmk_behavior_get_empty_param_metadata,
+#endif // IS_ENABLED(CONFIG_ZMK_BEHAVIOR_METADATA)
+};
+
+/* Register the behavior as "zmk,behavior-led-trigger" */
+BEHAVIOR_DT_INST_DEFINE(0, NULL, NULL, NULL, NULL, POST_KERNEL,
+                        CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &behavior_led_driver_api);
+#endif /* DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT) */
