@@ -122,12 +122,6 @@
 	pinctrl-1 = <&i2c0_sleep>;
 	pinctrl-names = "default", "sleep";
 
-	// npm1300: npm1300@6b {
-	// 	compatible = "i2c-device";
-	// 	reg = <0x6b>;
-	// 	status = "okay";
-	// };
-
 	npm1300: pmic@6b {
 		compatible = "nordic,npm1300";
 		reg = <0x6b>;
@@ -147,10 +141,34 @@
 				regulator-boot-on;
 			};
 			npm1300_buck2: BUCK2 {
-				regulator-min-microvolt = <3300000>;
+				/* On boot VOUT2 is 3.3V, configured by 330k OHm resistor to VSET2 */
+				/* This power rail drives the RGB LEDs and the nRF52 3.3V rail. */
+				/* The lowest voltag ethe nRF52 can run at it 1.7V */
+				regulator-min-microvolt = <1700000>;
+				regulator-init-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
 				regulator-boot-on;
 			};
+		};
+		// 1200mAh Li-ion battery
+		npm1300_charger: charger {
+			compatible = "nordic,npm1300-charger";
+			/* Charge Limit Voltage 4.2V */
+			term-microvolt = <4200000>;
+			/* A little lower than charge limit */
+			term-warm-microvolt = <4000000>;
+			/* 240mA (0.2C) constant current charge */
+			current-microamp = <240000>;
+			/* Maximum discharge current 1200mA (1C) */
+			/* Below 0degC only 240mA (0.2C) are allowed */
+			/* Fow now set to 600mA (0.5C)   are allowed */
+			dischg-limit-microamp = <600000>;
+			/* 1.5A VBUS limit for Type-C without PD negotiation */
+			vbus-limit-microamp = <1500000>;
+			/* NTC Thermistor */
+			thermistor-ohms = <10000>;
+			thermistor-beta = <3435>;
+			charging-enable;
 		};
 	};
 };
