@@ -47,3 +47,7 @@ CONFIG_BT_MAX_PAIRED=3
 # Increase stack size, otherwise crashes when pressing pairing button to switch
 # bluetooth profiles
 CONFIG_INPUT_THREAD_STACK_SIZE=2048
+
+CONFIG_ZMK_BATTERY_REPORTING=y
+# Every 5 seconds
+CONFIG_ZMK_BATTERY_REPORT_INTERVAL=5
