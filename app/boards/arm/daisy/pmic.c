@@ -124,7 +124,7 @@ void update_power_led(void)
 
 void update_ble_leds(void)
 {
-	printk("daisy: update_ble_leds: %s\n", protocol_switch_usb ? "USB" : "BLE");
+	printk("daisy: update_ble_leds: %s (%d)\n", protocol_switch_usb ? "USB" : "BLE", protocol_switch_usb);
 	/* Stop all blinking and turn all LEDs off. Start clean */
 	stop_blinking_led();
 	for (int i = 0; i < 3; i++) {
@@ -135,7 +135,6 @@ void update_ble_leds(void)
 	 * Because bluetooth transport is selected only if we have an active
 	 * profile. If it's not set to BLE, we don't have to show any pairing
 	 * LEDs. */
-	protocol_switch_usb = gpio_pin_get_dt(&protocol_switch);
 	if (protocol_switch_usb)
 		return;
 
@@ -226,8 +225,13 @@ int led_init(void)
 	gpio_pin_configure_dt(&blue_led, GPIO_OUTPUT_ACTIVE);
 
 	protocol_switch_usb = gpio_pin_get_dt(&protocol_switch);
-	printk("daisy: Protocol switch on boot: %s\n",
-			protocol_switch_usb ? "USB" : "BLE");
+	printk("daisy: Protocol switch on boot: %s (%d)\n",
+			protocol_switch_usb ? "USB" : "BLE",
+			protocol_switch_usb);
+	protocol_switch_usb = gpio_pin_get_raw(protocol_switch.port, protocol_switch.pin);
+	printk("daisy: Protocol switch on boot: RAW %s (%d)\n",
+			protocol_switch_usb ? "USB" : "BLE",
+			protocol_switch_usb);
 	if (protocol_switch_usb)
 		zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
 	else
@@ -245,6 +249,10 @@ static int on_led_binding_pressed(struct zmk_behavior_binding *binding, struct z
 {
 	protocol_switch_usb = binding->param1;
 	printk("daisy: Changed mode switch behavior %d. Current transport: %d\n", protocol_switch_usb, zmk_endpoints_selected().transport);
+	protocol_switch_usb = gpio_pin_get_dt(&protocol_switch);
+	printk("daisy: gpio: %s (%d)\n", protocol_switch_usb ? "USB" : "BLE", protocol_switch_usb);
+	protocol_switch_usb = gpio_pin_get_raw(protocol_switch.port, protocol_switch.pin);
+	printk("daisy: gpio RAW: %s (%d)\n", protocol_switch_usb ? "USB" : "BLE", protocol_switch_usb);
 
 	if (protocol_switch_usb)
 		zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
