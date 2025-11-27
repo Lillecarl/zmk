@@ -104,7 +104,7 @@
         compatible = "gpio-leds";
 	/* Capslock LED on keyboard membrane. Has pulldown on main PCB */
         caps_led: led_3 {
-            gpios = <&gpio0 15 GPIO_ACTIVE_HIGH>;
+            gpios = <&gpio1 15 GPIO_ACTIVE_HIGH>;
         };
     };
 };
