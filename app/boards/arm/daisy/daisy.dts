@@ -23,7 +23,7 @@
 		zephyr,sram = &sram0;
 		zephyr,flash = &flash0;
 		zephyr,code-partition = &slot0_partition;
-		zephyr,ieee802154 = &ieee802154;
+		zmk,battery = &npm1300_charger;
 	};
 
 	/**

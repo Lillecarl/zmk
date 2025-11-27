@@ -7,9 +7,10 @@ manifest:
     - name: FrameworkComputer
       url-base: https://github.com/FrameworkComputer
   projects:
-    - name: zephyr
-      remote: zmkfirmware
-      revision: v4.1.0+zmk-fixes
+    - name: zephyr-private
+      path: zephyr
+      remote: FrameworkComputer
+      revision: daisy-zephyr4.1
       clone-depth: 1
       import:
         name-blocklist:
