@@ -16,6 +16,7 @@
 #include <zmk/events/endpoint_changed.h>
 #include <zmk/events/wpm_state_changed.h>
 #include <zmk/events/layer_state_changed.h>
+#include <zmk/battery.h>
 #include <zmk/ble.h>
 #include <zmk/endpoints.h>
 #include <zmk/endpoints_types.h>
@@ -97,30 +98,70 @@ void stop_blinking_led(void)
 
 void update_power_led(void)
 {
-	// | Power Level   | Plugged in | Color |
-	// | <  10%        | No         | Red   |
-	// | >= 10%        | No         | Off   |
-	// | <  90%        | Yes        | Amber |
-	// | >= 90%        | Yes        | White |
-	if (zmk_usb_get_conn_state() == ZMK_USB_CONN_HID) {
-		// White - Compter connected
-		gpio_pin_set_dt(&red_led, 1);
-		gpio_pin_set_dt(&green_led, 1);
-		gpio_pin_set_dt(&blue_led, 1);
-	} else if (zmk_usb_get_conn_state() == ZMK_USB_CONN_POWERED) {
-		// Yellow - No Computer, but USB connected (e.g. charger)
-		gpio_pin_set_dt(&red_led, 1);
-		gpio_pin_set_dt(&green_led, 1);
-		gpio_pin_set_dt(&blue_led, 0);
-	} else if (zmk_usb_get_conn_state() == ZMK_USB_CONN_NONE) {
-		// Red - Battery connected, no USB
-		gpio_pin_set_dt(&red_led, 1);
-		gpio_pin_set_dt(&green_led, 0);
-		gpio_pin_set_dt(&blue_led, 0);
+	uint8_t soc = zmk_battery_state_of_charge();
+	enum zmk_usb_conn_state conn_state = zmk_usb_get_conn_state();
+	printk("daisy: update_power_led - SOC: %d Connected: %d\n",
+			soc, conn_state != ZMK_USB_CONN_NONE);
+	// | Power Level   | Plugged in | Color  | Comment             |
+	// |     0%        | No         | Purple | Impossible/critical |
+	// | <  10%        | No         | Red    | Critically low      |
+	// | >= 10%        | No         | Off    | Okay                |
+	// |     0%        | Yes        | Green  | No battery          |
+	// | <  10%        | Yes        | Blue   | Charging (low)      |
+	// | <  90%        | Yes        | Amber  | Charging            |
+	// | >= 90%        | Yes        | White  | Fully charged       |
+	if (conn_state == ZMK_USB_CONN_NONE) {
+		if (soc == 0) {
+			// Purple
+			gpio_pin_set_dt(&red_led, 1);
+			gpio_pin_set_dt(&green_led, 0);
+			gpio_pin_set_dt(&blue_led, 1);
+		} else if (soc < 10) {
+			// Red
+			gpio_pin_set_dt(&red_led, 1);
+			gpio_pin_set_dt(&green_led, 0);
+			gpio_pin_set_dt(&blue_led, 0);
+		} else {
+			// Off
+			gpio_pin_set_dt(&red_led, 0);
+			gpio_pin_set_dt(&green_led, 0);
+			gpio_pin_set_dt(&blue_led, 0);
+		}
 	} else {
-		printk("daisy: ERROR! Unexpected state *\n");
+		if (soc == 0) {
+			// Green
+			gpio_pin_set_dt(&red_led, 0);
+			gpio_pin_set_dt(&green_led, 1);
+			gpio_pin_set_dt(&blue_led, 0);
+		} else if (soc < 10) {
+			// Blue
+			gpio_pin_set_dt(&red_led, 0);
+			gpio_pin_set_dt(&green_led, 0);
+			gpio_pin_set_dt(&blue_led, 1);
+		} else if (soc < 90) {
+			// Amber
+			gpio_pin_set_dt(&red_led, 1);
+			gpio_pin_set_dt(&green_led, 1);
+			gpio_pin_set_dt(&blue_led, 0);
+		} else {
+			// White
+			gpio_pin_set_dt(&red_led, 1);
+			gpio_pin_set_dt(&green_led, 1);
+			gpio_pin_set_dt(&blue_led, 1);
+		}
 	}
 }
+
+#if IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+static int led_battery_listener_cb(const zmk_event_t *eh) {
+    // uint8_t battery_level = as_zmk_battery_state_changed(eh)->state_of_charge;
+    update_power_led();
+    return 0;
+}
+
+ZMK_LISTENER(led_battery_listener, led_battery_listener_cb);
+ZMK_SUBSCRIPTION(led_battery_listener, zmk_battery_state_changed);
+#endif // IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
 
 void update_ble_leds(void)
 {
