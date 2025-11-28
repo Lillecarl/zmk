@@ -180,18 +180,20 @@ void update_ble_leds(void)
 		return;
 
 	for (int i = 0; i < 3; i++) {
+		/* Order of GPIOs and label is reversed */
+		int led_index = 3 - i;
 		if (i != zmk_ble_active_profile_index()) {
 			/* Turn LEDs of not active profiles off */
-			led_off(pmic_leds, i);
+			led_off(pmic_leds, led_index);
 		} else if (zmk_ble_active_profile_is_connected()) {
 			/* Paired and connected, solid on */
-			led_on(pmic_leds, i);
+			led_on(pmic_leds, led_index);
 		} else if (zmk_ble_active_profile_is_open()) {
 			/* Fast blink if nothing paired */
-			start_blinking_led(i, 700);
+			start_blinking_led(led_index, 700);
 		} else {
 			/* Slow blink if paired but not connected */
-			start_blinking_led(i, 1400);
+			start_blinking_led(led_index, 1400);
 		}
 	}
 }
