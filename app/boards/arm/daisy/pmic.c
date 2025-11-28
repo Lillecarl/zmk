@@ -181,7 +181,7 @@ void update_ble_leds(void)
 
 	for (int i = 0; i < 3; i++) {
 		/* Order of GPIOs and label is reversed */
-		int led_index = 3 - i;
+		int led_index = 2 - i;
 		if (i != zmk_ble_active_profile_index()) {
 			/* Turn LEDs of not active profiles off */
 			led_off(pmic_leds, led_index);
