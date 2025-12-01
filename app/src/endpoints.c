@@ -186,6 +186,40 @@ static int send_consumer_report(void) {
     return -ENOTSUP;
 }
 
+static int send_radio_report(void) {
+    switch (current_instance.transport) {
+    case ZMK_TRANSPORT_USB: {
+#if IS_ENABLED(CONFIG_ZMK_USB)
+        int err = zmk_usb_hid_send_radio_report();
+        if (err) {
+            LOG_ERR("FAILED TO SEND OVER USB: %d", err);
+        }
+        return err;
+#else
+        LOG_ERR("USB endpoint is not supported");
+        return -ENOTSUP;
+#endif /* IS_ENABLED(CONFIG_ZMK_USB) */
+    }
+
+    case ZMK_TRANSPORT_BLE: {
+#if IS_ENABLED(CONFIG_ZMK_BLE)
+        struct zmk_hid_radio_report *radio_report = zmk_hid_get_radio_report();
+        int err = zmk_hog_send_radio_report(&radio_report->body);
+        if (err) {
+            LOG_ERR("FAILED TO SEND OVER HOG: %d", err);
+        }
+        return err;
+#else
+        LOG_ERR("BLE HOG endpoint is not supported");
+        return -ENOTSUP;
+#endif /* IS_ENABLED(CONFIG_ZMK_BLE) */
+    }
+    }
+
+    LOG_ERR("Unhandled endpoint transport %d", current_instance.transport);
+    return -ENOTSUP;
+}
+
 int zmk_endpoints_send_report(uint16_t usage_page) {
 
     LOG_DBG("usage page 0x%02X", usage_page);
@@ -195,6 +229,9 @@ int zmk_endpoints_send_report(uint16_t usage_page) {
 
     case HID_USAGE_CONSUMER:
         return send_consumer_report();
+
+    case HID_USAGE_GD:
+        return send_radio_report();
     }
 
     LOG_ERR("Unsupported usage page %d", usage_page);
@@ -332,12 +369,14 @@ static int zmk_endpoints_init(void) {
 void zmk_endpoints_clear_current(void) {
     zmk_hid_keyboard_clear();
     zmk_hid_consumer_clear();
+    zmk_hid_radio_clear();
 #if IS_ENABLED(CONFIG_ZMK_POINTING)
     zmk_hid_mouse_clear();
 #endif // IS_ENABLED(CONFIG_ZMK_POINTING)
 
     zmk_endpoints_send_report(HID_USAGE_KEY);
     zmk_endpoints_send_report(HID_USAGE_CONSUMER);
+    zmk_endpoints_send_report(HID_USAGE_GD);
 }
 
 static void update_current_endpoint(void) {

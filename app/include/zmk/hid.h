@@ -76,6 +76,7 @@
 #define ZMK_HID_REPORT_ID_LEDS 0x01
 #define ZMK_HID_REPORT_ID_CONSUMER 0x02
 #define ZMK_HID_REPORT_ID_MOUSE 0x03
+#define ZMK_HID_REPORT_ID_RADIO 0x04
 
 #ifndef HID_ITEM_TAG_PUSH
 #define HID_ITEM_TAG_PUSH 0xA
@@ -183,6 +184,22 @@ static const uint8_t zmk_hid_report_desc[] = {
 #endif
     HID_REPORT_COUNT(CONFIG_ZMK_HID_CONSUMER_REPORT_SIZE),
     HID_INPUT(ZMK_HID_MAIN_VAL_DATA | ZMK_HID_MAIN_VAL_ARRAY | ZMK_HID_MAIN_VAL_ABS),
+    HID_END_COLLECTION,
+
+    HID_USAGE_PAGE(HID_USAGE_GD),
+    HID_USAGE(HID_USAGE_GD_WIRELESS_RADIO_CONTROLS),
+    HID_COLLECTION(HID_COLLECTION_APPLICATION),
+    HID_REPORT_ID(ZMK_HID_REPORT_ID_RADIO),
+    HID_LOGICAL_MIN8(0x00),
+    HID_LOGICAL_MAX8(0x01),
+    HID_USAGE(HID_USAGE_GD_WIRELESS_RADIO_BUTTON),
+    HID_REPORT_SIZE(0x01),
+    HID_REPORT_COUNT(0x01),
+    HID_INPUT(ZMK_HID_MAIN_VAL_DATA | ZMK_HID_MAIN_VAL_VAR | ZMK_HID_MAIN_VAL_REL),
+    // Constant padding for the last 7 bits.
+    HID_REPORT_SIZE(0x07),
+    HID_REPORT_COUNT(0x01),
+    HID_INPUT(ZMK_HID_MAIN_VAL_CONST | ZMK_HID_MAIN_VAL_VAR | ZMK_HID_MAIN_VAL_ABS),
     HID_END_COLLECTION,
 
 #if IS_ENABLED(CONFIG_ZMK_POINTING)
@@ -311,6 +328,15 @@ struct zmk_hid_consumer_report {
     struct zmk_hid_consumer_report_body body;
 } __packed;
 
+struct zmk_hid_radio_report_body {
+    uint8_t toggle;
+} __packed;
+
+struct zmk_hid_radio_report {
+    uint8_t report_id;
+    struct zmk_hid_radio_report_body body;
+} __packed;
+
 #if IS_ENABLED(CONFIG_ZMK_POINTING)
 struct zmk_hid_mouse_report_body {
     zmk_mouse_button_flags_t buttons;
@@ -363,6 +389,11 @@ int zmk_hid_consumer_release(zmk_key_t key);
 void zmk_hid_consumer_clear(void);
 bool zmk_hid_consumer_is_pressed(zmk_key_t key);
 
+int zmk_hid_radio_press(zmk_key_t key);
+int zmk_hid_radio_release(zmk_key_t key);
+void zmk_hid_radio_clear(void);
+bool zmk_hid_radio_is_pressed(zmk_key_t key);
+
 int zmk_hid_press(uint32_t usage);
 int zmk_hid_release(uint32_t usage);
 bool zmk_hid_is_pressed(uint32_t usage);
@@ -382,6 +413,7 @@ void zmk_hid_mouse_clear(void);
 
 struct zmk_hid_keyboard_report *zmk_hid_get_keyboard_report(void);
 struct zmk_hid_consumer_report *zmk_hid_get_consumer_report(void);
+struct zmk_hid_radio_report *zmk_hid_get_radio_report(void);
 
 #if IS_ENABLED(CONFIG_ZMK_USB_BOOT)
 zmk_hid_boot_report_t *zmk_hid_get_boot_report();
