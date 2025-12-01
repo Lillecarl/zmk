@@ -102,7 +102,7 @@
         fn_layer {
             display-name = "FN Layer";
             bindings = <
-                &trans &trans
+                &bootloader &trans
                 // ---------------------------------------------------------------------------------------------------------
                 // | FNLK |  F1 |  F2 |  F3  |  F4  |  F5  |  F6  |  F7   |  F8   |  F9  |  F10  |  F11  |  F12  |  INS    |
                 // |    |     |     |      |      |      |      |       |       |      |       |       |       |           |
@@ -124,7 +124,7 @@
         fnlock_layer {
             display-name = "FN Lock Layer";
             bindings = <
-                &trans &trans
+                &pairing_button 0 0 &usb_bt_sw
                 // ---------------------------------------------------------------------------------------------------------
                 // | FNLK |  F1 |  F2 |  F3  |  F4  |  F5  |  F6  |  F7   |  F8   |  F9  |  F10  |  F11  |  F12  |  DEL    |
                 // |    |     |     |      |      |      |      |       |       |      |       |       |       |           |
@@ -146,7 +146,7 @@
         fm_layer {
             display-name = "FM Layer (Temp FN unlock)";
             bindings = <
-                &trans &trans
+                &bootloader &trans
                 // ---------------------------------------------------------------------------------------------------------
                 // | FNLK |Mute |Prev |Next  |Prev  |Play  | Next |BrDown |BrUp   |Displ |Airplne|Print  | Media |  DEL    |
                 // |    |     |     |      |      |      |      |       |       |      |       |       |       |           |
