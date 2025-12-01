@@ -63,6 +63,8 @@
         wakeup-source;
 
         diode-direction = "col2row";
+        debounce-press-ms = <1>;
+        debounce-release-ms = <5>;
 
 	// UART on DK: P0.05, P0.06, P0.07, and P0.08
 	// NFC on DK: P0.09 and P0.10
