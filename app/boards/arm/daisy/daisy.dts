@@ -36,7 +36,6 @@
 		    gpios = <&gpio1 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
 		    label = "Red LED";
 		};
-		// I think the schematic has them labeled wrong
 		blue_led: led_1 {
 		    gpios = <&gpio1 11 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
 		    label = "Blue LED";
@@ -88,6 +87,9 @@
 };
 
 &uicr {
+	// Use 	P0.09 and P0.10 as GPIO for KSO instead of NFC
+	nfct-pins-as-gpios;
+	// Use P0.18 as nRESET
 	gpio-as-nreset;
 };
 
@@ -246,12 +248,4 @@
 zephyr_udc0: &usbd {
 	compatible = "nordic,nrf-usbd";
 	status = "okay";
-};
-
-
-&uicr {
-	// Use 	P0.09 and P0.10 as GPIO for KSO instead of NFC
-	nfct-pins-as-gpios;
-	// Use P0.18 as nRESET
-	gpio-as-nreset;
 };
