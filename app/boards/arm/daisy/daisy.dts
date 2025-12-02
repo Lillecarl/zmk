@@ -39,20 +39,29 @@
 		    gpios = <&gpio1 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
 		    label = "Red LED";
 		};
-		blue_led: led_1 {
-		    gpios = <&gpio1 11 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
-		    label = "Blue LED";
-		};
 		green_led: led_2 {
 		    gpios = <&gpio1 12 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
 		    label = "Green LED";
+		};
+		blue_led: led_1 {
+		    gpios = <&gpio1 11 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+		    label = "Blue LED";
 		};
 	};
 
 	pwmleds {
 		compatible = "pwm-leds";
-		pwm_led0: pwm_led_0 {
-			pwms = <&pwm0 0 PWM_MSEC(20) PWM_POLARITY_INVERTED>;
+
+		rgb1_red_pwm_led: pwm_led_0 {
+			pwms = <&pwm0 0 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
+		};
+
+		rgb1_green_pwm_led: pwm_led_1 {
+			pwms = <&pwm0 2 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
+		};
+
+		rgb1_blue_pwm_led: pwm_led_2 {
+			pwms = <&pwm0 1 PWM_MSEC(20) PWM_POLARITY_NORMAL>;
 		};
 	};
 
@@ -77,7 +86,12 @@
 		led0 = &red_led;
 		led1 = &green_led;
 		led2 = &blue_led;
-		pwm-led0 = &pwm_led0;
+		pwm-led0 = &rgb1_red_pwm_led;
+		pwm-led1 = &rgb1_green_pwm_led;
+		pwm-led2 = &rgb1_blue_pwm_led;
+		red-pwm-led = &rgb1_red_pwm_led;
+		green-pwm-led = &rgb1_green_pwm_led;
+		blue-pwm-led = &rgb1_blue_pwm_led;
 		bootloader-led0 = &red_led;
 		mcuboot-button0 = &button0;
 		mcuboot-led0 = &red_led;
