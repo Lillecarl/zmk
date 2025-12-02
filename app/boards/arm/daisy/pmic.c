@@ -4,6 +4,7 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/sensor/npm1300_charger.h>
 #include <zephyr/drivers/led.h>
+#include <zephyr/drivers/pwm.h>
 #include <zephyr/dt-bindings/regulator/npm1300.h>
 #include <zephyr/drivers/mfd/npm1300.h>
 #include <zephyr/input/input.h>
@@ -27,9 +28,7 @@
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
 static const struct device *pmic_leds = DEVICE_DT_GET(DT_NODELABEL(npm1300_ek_leds));
-static const struct gpio_dt_spec red_led = GPIO_DT_SPEC_GET(DT_NODELABEL(red_led), gpios);
-static const struct gpio_dt_spec green_led = GPIO_DT_SPEC_GET(DT_NODELABEL(green_led), gpios);
-static const struct gpio_dt_spec blue_led = GPIO_DT_SPEC_GET(DT_NODELABEL(blue_led), gpios);
+static const struct device *rgb_leds = DEVICE_DT_GET(DT_COMPAT_GET_ANY_STATUS_OKAY(pwm_leds));
 static const struct gpio_dt_spec protocol_switch = GPIO_DT_SPEC_GET(DT_NODELABEL(protocol_switch), gpios);
 
 /* State of the protocol switch (BLE or USB). 1 if set to USB */
@@ -96,6 +95,27 @@ void stop_blinking_led(void)
     led_off(pmic_leds, led_ctx.led_idx);
 }
 
+#define BRT        25
+#define SET_OFF    set_rgb_color(  0,   0,   0)
+#define SET_RED    set_rgb_color(BRT,   0,   0)
+#define SET_GREEN  set_rgb_color(  0, BRT,   0)
+#define SET_BLUE   set_rgb_color(  0,   0, BRT)
+#define SET_AMBER  set_rgb_color(BRT, BRT,   0)
+#define SET_PURPLE set_rgb_color(BRT,   0, BRT)
+#define SET_CYAN   set_rgb_color(  0, BRT, BRT)
+#define SET_WHITE  set_rgb_color(BRT, BRT, BRT)
+
+void set_rgb_color(uint8_t r, uint8_t g, uint8_t b)
+{
+    if (!device_is_ready(rgb_leds)) {
+        return;
+    }
+
+    led_set_brightness(rgb_leds, 0, r);
+    led_set_brightness(rgb_leds, 1, g);
+    led_set_brightness(rgb_leds, 2, b);
+}
+
 void update_power_led(void)
 {
 	uint8_t soc = zmk_battery_state_of_charge();
@@ -113,41 +133,27 @@ void update_power_led(void)
 	if (conn_state == ZMK_USB_CONN_NONE) {
 		if (soc == 0) {
 			// Purple
-			gpio_pin_set_dt(&red_led, 1);
-			gpio_pin_set_dt(&green_led, 0);
-			gpio_pin_set_dt(&blue_led, 1);
+			SET_PURPLE;
 		} else if (soc < 10) {
 			// Red
-			gpio_pin_set_dt(&red_led, 1);
-			gpio_pin_set_dt(&green_led, 0);
-			gpio_pin_set_dt(&blue_led, 0);
+			SET_RED;
 		} else {
 			// Off
-			gpio_pin_set_dt(&red_led, 0);
-			gpio_pin_set_dt(&green_led, 0);
-			gpio_pin_set_dt(&blue_led, 0);
+			SET_OFF;
 		}
 	} else {
 		if (soc == 0) {
 			// Green
-			gpio_pin_set_dt(&red_led, 0);
-			gpio_pin_set_dt(&green_led, 1);
-			gpio_pin_set_dt(&blue_led, 0);
+			SET_GREEN;
 		} else if (soc < 10) {
 			// Blue
-			gpio_pin_set_dt(&red_led, 0);
-			gpio_pin_set_dt(&green_led, 0);
-			gpio_pin_set_dt(&blue_led, 1);
+			SET_BLUE;
 		} else if (soc < 90) {
 			// Amber
-			gpio_pin_set_dt(&red_led, 1);
-			gpio_pin_set_dt(&green_led, 1);
-			gpio_pin_set_dt(&blue_led, 0);
+			SET_AMBER;
 		} else {
 			// White
-			gpio_pin_set_dt(&red_led, 1);
-			gpio_pin_set_dt(&green_led, 1);
-			gpio_pin_set_dt(&blue_led, 1);
+			SET_WHITE;
 		}
 	}
 }
@@ -250,22 +256,14 @@ static int daisy_leds_update_listener(const zmk_event_t *eh)
 int led_init(void)
 {
 	if (!device_is_ready(pmic_leds)) {
-		printk("Error: led device is not ready\n");
+		printk("Error: PMIC led device is not ready\n");
 		return 0;
 	}
 
-	if (!gpio_is_ready_dt(&red_led)) {
+	if (!device_is_ready(rgb_leds)) {
+		printk("Error: PWM LED device %s is not ready", rgb_leds->name);
 		return 0;
 	}
-	if (!gpio_is_ready_dt(&green_led)) {
-		return 0;
-	}
-	if (!gpio_is_ready_dt(&blue_led)) {
-		return 0;
-	}
-	gpio_pin_configure_dt(&red_led, GPIO_OUTPUT_ACTIVE);
-	gpio_pin_configure_dt(&green_led, GPIO_OUTPUT_ACTIVE);
-	gpio_pin_configure_dt(&blue_led, GPIO_OUTPUT_ACTIVE);
 
 	protocol_switch_usb = gpio_pin_get_dt(&protocol_switch);
 	printk("daisy: Protocol switch on boot: %s (%d)\n",
