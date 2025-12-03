@@ -5,7 +5,7 @@ manifest:
     - name: zmkfirmware
       url-base: https://github.com/zmkfirmware
     - name: FrameworkComputer
-      url-base: https://github.com/FrameworkComputer
+      url-base: git@github.com:FrameworkComputer
   projects:
     - name: zephyr-private
       path: zephyr
