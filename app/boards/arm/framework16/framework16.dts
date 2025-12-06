@@ -65,7 +65,7 @@
 
     // Dummy keyscan to make it compile
     kscan0: kscan {
-        compatible = "zmk,kscan-gpio-matrix";
+        compatible = "zmk,kscan-gpio-adc";
         wakeup-source;
 
         diode-direction = "col2row";

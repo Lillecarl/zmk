@@ -5,6 +5,7 @@ DT_COMPAT_ZMK_KSCAN_COMPOSITE := zmk,kscan-composite
 DT_COMPAT_ZMK_KSCAN_GPIO_DEMUX := zmk,kscan-gpio-demux
 DT_COMPAT_ZMK_KSCAN_GPIO_DIRECT := zmk,kscan-gpio-direct
 DT_COMPAT_ZMK_KSCAN_GPIO_MATRIX := zmk,kscan-gpio-matrix
+DT_COMPAT_ZMK_KSCAN_GPIO_ADC := zmk,kscan-gpio-adc
 DT_COMPAT_ZMK_KSCAN_GPIO_CHARLIEPLEX := zmk,kscan-gpio-charlieplex
 DT_COMPAT_ZMK_KSCAN_MOCK := zmk,kscan-mock
 
@@ -37,6 +38,11 @@ config ZMK_KSCAN_GPIO_DIRECT
     default $(dt_compat_enabled,$(DT_COMPAT_ZMK_KSCAN_GPIO_DIRECT))
     select ZMK_KSCAN_GPIO_DRIVER
 
+config ZMK_KSCAN_GPIO_ADC
+    bool
+    default $(dt_compat_enabled,$(DT_COMPAT_ZMK_KSCAN_GPIO_ADC))
+    select ZMK_KSCAN_GPIO_DRIVER
+
 config ZMK_KSCAN_GPIO_MATRIX
     bool
     default $(dt_compat_enabled,$(DT_COMPAT_ZMK_KSCAN_GPIO_MATRIX))
@@ -47,7 +53,7 @@ config ZMK_KSCAN_GPIO_CHARLIEPLEX
     default $(dt_compat_enabled,$(DT_COMPAT_ZMK_KSCAN_GPIO_CHARLIEPLEX))
     select ZMK_KSCAN_GPIO_DRIVER
 
-if ZMK_KSCAN_GPIO_MATRIX
+if ZMK_KSCAN_GPIO_MATRIX || ZMK_KSCAN_GPIO_ADC
 
 config ZMK_KSCAN_MATRIX_WAIT_BEFORE_INPUTS
     int "Ticks to wait before reading inputs after an output set active"
