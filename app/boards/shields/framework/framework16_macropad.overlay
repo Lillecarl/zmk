@@ -1,0 +1,29 @@
+/*
+ * Copyright (c) 2025 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "framework16.dtsi"
+
+#include <dt-bindings/zmk/matrix_transform.h>
+
+/ {
+    chosen {
+        zmk,matrix-transform = &macropad_transform;
+    };
+    macropad_transform: macropad_transform {
+        compatible = "zmk,matrix-transform";
+        columns = <8>;
+        rows = <4>;
+        map = <
+        // (row, col)
+        RC(2,1) RC(2,2) RC(3,4) RC(2,4)
+        RC(0,0) RC(0,4) RC(1,1) RC(1,6)
+        RC(0,1) RC(0,5) RC(1,2) RC(2,5)
+        RC(0,2) RC(0,6) RC(1,3) RC(1,7)
+        RC(0,3) RC(0,7) RC(1,4) RC(2,6)
+        RC(1,0) RC(2,7) RC(1,5) RC(2,0)
+        >;
+    };
+};
