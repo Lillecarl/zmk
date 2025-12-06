@@ -27,6 +27,19 @@
     // chosen {
     //     zmk,physical-layout = &matrix_layout;
     // };
+    macros {
+          air: airplane_button {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            // Simulate press WIN+P
+            // Works (at least) on Windows and GNOME
+            bindings
+                = <&macro_press &kp LGUI>
+                , <&macro_tap &kp P>
+                , <&macro_release &kp LGUI>
+               ;
+       };
+    };
     keymap {
         compatible = "zmk,keymap";
         default_layer {
@@ -40,7 +53,7 @@
                 // | SHIFT       |  Z  |  X   |  C   |  V   |  B   |  N   |  M    |  ,    |  .   |   /    | SHIFT          |
                 // | CTRL  | FN  | GUI | ALT  | CTRL |        SPACE                | ALT  | CTRL | LEFT   | UP     | RIGHT |
                 // |                                                                                      | DOWN   |
-                &kp ESC   &kp C_MUTE &kp C_VOL_DN &kp C_VOL_UP &kp C_PREV &kp C_PP &kp C_NEXT &kp C_BRI_DN &kp C_BRI_UP TODO TODO &kp PSCRN TODO &kp DEL
+                &kp ESC   &kp C_MUTE &kp C_VOL_DN &kp C_VOL_UP &kp C_PREV &kp C_PP &kp C_NEXT &kp C_BRI_DN &kp C_BRI_UP &disp TODO &kp PSCRN &kp C_AL_CCC &kp DEL
                 &kp GRAVE &kp N1 &kp N2   &kp N3   &kp N4   &kp N5   &kp N6   &kp N7   &kp N8   &kp N9    &kp N0    &kp MINUS &kp EQUAL &kp BSPC
                 &kp TAB   &kp Q  &kp W    &kp E    &kp R    &kp T    &kp Y    &kp U    &kp I    &kp O     &kp P     &kp LBKT  &kp RBKT  &kp BSLH
                 &kp CAPS  &kp A  &kp S    &kp D    &kp F    &kp G    &kp H    &kp J    &kp K    &kp L     &kp SEMI  &kp SQT   &kp RET
@@ -66,7 +79,7 @@
                 ______    ______ ______   ______   ______   ______   ______   ______   ______   ______    ______    ______    &kp PAUSE ______
                 ______    ______ ______   ______   ______   ______   ______   ______   ______   ______    ______    ______    ______
                 ______           ______   ______   ______   ______   &kp PAUSE ______  ______   ______    ______    ______    ______
-                ______    &none  ______   ______                     ______                     ______    ______    &kp HOME  &kp PG_UP &kp END
+                ______    ______ ______   ______                     ______                     ______    ______    &kp HOME  &kp PG_UP &kp END
                                                                                                                               &kp PG_DN
            >;
         };
@@ -103,7 +116,7 @@
                 // |             |     |      |      |      |      |      |       |       |      |        |                |
                 // |       |     |     |      |      |                             |      |      | HOME   | PG UP  | END   |
                 // |                                                                                      | PG DN  |
-                &tog FNLK &kp C_MUTE &kp C_VOL_DN &kp C_VOL_UP &kp C_PREV &kp C_PP &kp C_NEXT &kp C_BRI_DN &kp C_BRI_UP TODO TODO &kp PSCRN TODO &kp DEL
+                &tog FNLK &kp C_MUTE &kp C_VOL_DN &kp C_VOL_UP &kp C_PREV &kp C_PP &kp C_NEXT &kp C_BRI_DN &kp C_BRI_UP &disp TODO &kp PSCRN &kp C_AL_CCC &kp DEL
                 ______    ______ ______   ______   ______   ______   ______   ______   ______   ______    ______    ______    ______    ______
                 ______    ______ ______   ______   ______   ______   ______   ______   ______   ______    &kp PAUSE ______    ______    ______
                 ______    ______ ______   ______   ______   ______   ______   ______   ______   ______    ______    ______    ______
