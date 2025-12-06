@@ -22,8 +22,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define DT_DRV_COMPAT zmk_kscan_gpio_adc
 
-#define INST_ROWS_LEN(n) DT_INST_PROP_LEN(n, adc_gpios)
+#define INST_ADCS_LEN(n) DT_INST_PROP_LEN(n, adc_gpios)
 #define INST_COLS_LEN(n) DT_INST_PROP_LEN(n, col_gpios)
+#define INST_ROWS_LEN(n) 8
 #define INST_MATRIX_LEN(n) (INST_ROWS_LEN(n) * INST_COLS_LEN(n))
 #define INST_INPUTS_LEN(n) INST_COLS_LEN(n)
 
@@ -43,7 +44,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define USE_POLLING IS_ENABLED(CONFIG_ZMK_KSCAN_MATRIX_POLLING)
 
-#define KSCAN_GPIO_ROW_CFG_INIT(idx, inst_idx)                                                     \
+#define KSCAN_GPIO_ADC_CFG_INIT(idx, inst_idx)                                                     \
     KSCAN_GPIO_GET_BY_IDX(DT_DRV_INST(inst_idx), adc_gpios, idx)
 #define KSCAN_GPIO_COL_CFG_INIT(idx, inst_idx)                                                     \
     KSCAN_GPIO_GET_BY_IDX(DT_DRV_INST(inst_idx), col_gpios, idx)
@@ -71,6 +72,7 @@ struct kscan_matrix_data {
 
 struct kscan_matrix_config {
     struct kscan_gpio_list outputs;
+    struct kscan_gpio_list adc_gpios;
     struct zmk_debounce_config debounce_config;
     uint8_t io_channel;
     const struct gpio_dt_spec mux_enable;
@@ -139,6 +141,14 @@ static void kscan_matrix_read_end(const struct device *dev) {
 #endif
 }
 
+static void mux_set_row(const struct device *dev, int row) {
+    const struct kscan_matrix_config *config = dev->config;
+    // TODO: Rows and mux indeces may not map one to one
+    gpio_pin_set_dt(&config->adc_gpios.gpios[0].spec, row & 1);
+    gpio_pin_set_dt(&config->adc_gpios.gpios[1].spec, row & 2);
+    gpio_pin_set_dt(&config->adc_gpios.gpios[2].spec, row & 4);
+}
+
 static int kscan_matrix_read(const struct device *dev) {
     struct kscan_matrix_data *data = dev->data;
     const struct kscan_matrix_config *config = dev->config;
@@ -158,7 +168,11 @@ static int kscan_matrix_read(const struct device *dev) {
 #endif
         struct kscan_gpio_port_state state = {0};
 
-        // for (int j = 0; j < data->inputs.len; j++) {
+	// TODO: Maybe dynamically determine row number if fewer than 8
+        for (int row = 0; row < config->rows; row++) {
+		mux_set_row(dev, row);
+		// TODO: Read ADC value and threshold with 2.9V
+		// TODO: Advanced check how many keys are under threshold
         //     const struct kscan_gpio *in_gpio = &data->inputs.gpios[j];
 
         //     const int index = state_index_io(config, in_gpio->index, out_gpio->index);
@@ -170,7 +184,7 @@ static int kscan_matrix_read(const struct device *dev) {
 
         //     zmk_debounce_update(&data->matrix_state[index], active, config->debounce_scan_period_ms,
         //                         &config->debounce_config);
-        // }
+        }
 
         err = gpio_pin_set_dt(&out_gpio->spec, 0);
         if (err) {
@@ -407,8 +421,8 @@ static const struct kscan_driver_api kscan_matrix_api = {
     BUILD_ASSERT(INST_DEBOUNCE_RELEASE_MS(n) <= DEBOUNCE_COUNTER_MAX,                              \
                  "ZMK_KSCAN_DEBOUNCE_RELEASE_MS or debounce-release-ms is too large");             \
                                                                                                    \
-    static struct kscan_gpio kscan_matrix_rows_##n[] = {                                           \
-        LISTIFY(INST_ROWS_LEN(n), KSCAN_GPIO_ROW_CFG_INIT, (, ), n)};                              \
+    static struct kscan_gpio kscan_adc_gpios_##n[] = {                                             \
+        LISTIFY(INST_ADCS_LEN(n), KSCAN_GPIO_ADC_CFG_INIT, (, ), n)};                              \
                                                                                                    \
     static struct kscan_gpio kscan_matrix_cols_##n[] = {                                           \
         LISTIFY(INST_COLS_LEN(n), KSCAN_GPIO_COL_CFG_INIT, (, ), n)};                              \
@@ -423,10 +437,11 @@ static const struct kscan_driver_api kscan_matrix_api = {
     static const struct kscan_matrix_config kscan_matrix_config_##n = {                            \
         .io_channel = DT_IO_CHANNELS_INPUT(DT_DRV_INST(n)),                                        \
         .mux_enable = GPIO_DT_SPEC_INST_GET(n, mux_enable_gpios),                                  \
-        .rows = ARRAY_SIZE(kscan_matrix_rows_##n),                                                 \
         .cols = ARRAY_SIZE(kscan_matrix_cols_##n),                                                 \
+        .adc_gpios =                                                                               \
+            KSCAN_GPIO_LIST(kscan_adc_gpios_##n),                                                  \
         .outputs =                                                                                 \
-            KSCAN_GPIO_LIST(kscan_matrix_rows_##n),                                                \
+            KSCAN_GPIO_LIST(kscan_matrix_cols_##n),                                                \
         .debounce_config =                                                                         \
             {                                                                                      \
                 .debounce_press_ms = INST_DEBOUNCE_PRESS_MS(n),                                    \
