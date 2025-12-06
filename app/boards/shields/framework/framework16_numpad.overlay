@@ -6,16 +6,24 @@
 
 #include "framework16.dtsi"
 
-#include <behaviors.dtsi>
-#include <dt-bindings/led/led.h>
-#include <dt-bindings/zmk/backlight.h>
-#include <dt-bindings/zmk/ext_power.h>
-#include <dt-bindings/zmk/keys.h>
 #include <dt-bindings/zmk/matrix_transform.h>
-#include <dt-bindings/zmk/rgb.h>
 
 / {
-    // chosen {
-    //     zmk,physical-layout = &matrix_layout;
-    // };
+    chosen {
+        zmk,matrix-transform = &numpad_transform;
+    };
+    numpad_transform: numpad_transform {
+        compatible = "zmk,matrix-transform";
+        columns = <8>;
+        rows = <4>;
+        map = <
+        // (row, col)
+        RC(2,1) RC(2,2) RC(3,4) RC(2,4)
+        RC(0,0) RC(0,4) RC(1,1) RC(1,6)
+        RC(0,1) RC(0,5) RC(1,2)
+        RC(0,2) RC(0,6) RC(1,3) RC(1,7)
+        RC(0,3) RC(0,7) RC(1,4)
+        RC(1,0)         RC(1,5) RC(2,0)
+        >;
+    };
 };
