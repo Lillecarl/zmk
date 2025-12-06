@@ -8,7 +8,7 @@ compatible: "zmk,kscan-gpio-adc"
 include: kscan.yaml
 
 properties:
-  row-gpios:
+  adc-gpios:
     type: phandle-array
     required: true
   col-gpios:

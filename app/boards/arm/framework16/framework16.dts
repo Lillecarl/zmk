@@ -69,7 +69,7 @@
         wakeup-source;
 
         diode-direction = "col2row";
-        row-gpios
+        adc-gpios
                   = <&gpio0 1 GPIO_ACTIVE_HIGH>
                   , <&gpio0 2 GPIO_ACTIVE_HIGH>
                   , <&gpio0 3 GPIO_ACTIVE_HIGH>

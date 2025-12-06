@@ -26,7 +26,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #define COND_DIODE_DIR(n, row2col_code, col2row_code)                                              \
     COND_CODE_0(INST_DIODE_DIR(n), row2col_code, col2row_code)
 
-#define INST_ROWS_LEN(n) DT_INST_PROP_LEN(n, row_gpios)
+#define INST_ROWS_LEN(n) DT_INST_PROP_LEN(n, adc_gpios)
 #define INST_COLS_LEN(n) DT_INST_PROP_LEN(n, col_gpios)
 #define INST_MATRIX_LEN(n) (INST_ROWS_LEN(n) * INST_COLS_LEN(n))
 #define INST_INPUTS_LEN(n) COND_DIODE_DIR(n, (INST_COLS_LEN(n)), (INST_ROWS_LEN(n)))
@@ -53,7 +53,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
     COND_CODE_1(CONFIG_ZMK_KSCAN_MATRIX_POLLING, pollcode, intcode)
 
 #define KSCAN_GPIO_ROW_CFG_INIT(idx, inst_idx)                                                     \
-    KSCAN_GPIO_GET_BY_IDX(DT_DRV_INST(inst_idx), row_gpios, idx)
+    KSCAN_GPIO_GET_BY_IDX(DT_DRV_INST(inst_idx), adc_gpios, idx)
 #define KSCAN_GPIO_COL_CFG_INIT(idx, inst_idx)                                                     \
     KSCAN_GPIO_GET_BY_IDX(DT_DRV_INST(inst_idx), col_gpios, idx)
 
