@@ -35,9 +35,3 @@ properties:
     type: int
     default: 10
     description: Time between reads in milliseconds when no key is pressed and ZMK_KSCAN_MATRIX_POLLING is enabled.
-  diode-direction:
-    type: string
-    default: row2col
-    enum:
-      - row2col
-      - col2row

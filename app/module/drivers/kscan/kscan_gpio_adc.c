@@ -22,14 +22,10 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #define DT_DRV_COMPAT zmk_kscan_gpio_adc
 
-#define INST_DIODE_DIR(n) DT_ENUM_IDX(DT_DRV_INST(n), diode_direction)
-#define COND_DIODE_DIR(n, row2col_code, col2row_code)                                              \
-    COND_CODE_0(INST_DIODE_DIR(n), row2col_code, col2row_code)
-
 #define INST_ROWS_LEN(n) DT_INST_PROP_LEN(n, adc_gpios)
 #define INST_COLS_LEN(n) DT_INST_PROP_LEN(n, col_gpios)
 #define INST_MATRIX_LEN(n) (INST_ROWS_LEN(n) * INST_COLS_LEN(n))
-#define INST_INPUTS_LEN(n) COND_DIODE_DIR(n, (INST_COLS_LEN(n)), (INST_ROWS_LEN(n)))
+#define INST_INPUTS_LEN(n) INST_COLS_LEN(n)
 
 #if CONFIG_ZMK_KSCAN_DEBOUNCE_PRESS_MS >= 0
 #define INST_DEBOUNCE_PRESS_MS(n) CONFIG_ZMK_KSCAN_DEBOUNCE_PRESS_MS
@@ -56,11 +52,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
     KSCAN_GPIO_GET_BY_IDX(DT_DRV_INST(inst_idx), adc_gpios, idx)
 #define KSCAN_GPIO_COL_CFG_INIT(idx, inst_idx)                                                     \
     KSCAN_GPIO_GET_BY_IDX(DT_DRV_INST(inst_idx), col_gpios, idx)
-
-enum kscan_diode_direction {
-    KSCAN_ROW2COL,
-    KSCAN_COL2ROW,
-};
 
 struct kscan_matrix_irq_callback {
     const struct device *dev;
@@ -92,7 +83,6 @@ struct kscan_matrix_config {
     size_t cols;
     int32_t debounce_scan_period_ms;
     int32_t poll_period_ms;
-    enum kscan_diode_direction diode_direction;
 };
 
 /**
@@ -110,9 +100,7 @@ static int state_index_rc(const struct kscan_matrix_config *config, const int ro
  */
 static int state_index_io(const struct kscan_matrix_config *config, const int input_idx,
                           const int output_idx) {
-    return (config->diode_direction == KSCAN_ROW2COL)
-               ? state_index_rc(config, output_idx, input_idx)
-               : state_index_rc(config, input_idx, output_idx);
+    return state_index_rc(config, output_idx, input_idx);
 }
 
 static int kscan_matrix_set_all_outputs(const struct device *dev, const int value) {
@@ -511,7 +499,7 @@ static const struct kscan_driver_api kscan_matrix_api = {
                                                                                                    \
     static struct kscan_matrix_data kscan_matrix_data_##n = {                                      \
         .inputs =                                                                                  \
-            KSCAN_GPIO_LIST(COND_DIODE_DIR(n, (kscan_matrix_cols_##n), (kscan_matrix_rows_##n))),  \
+            KSCAN_GPIO_LIST(kscan_matrix_cols_##n),                                                \
         .matrix_state = kscan_matrix_state_##n,                                                    \
         COND_INTERRUPTS((.irqs = kscan_matrix_irqs_##n, ))};                                       \
                                                                                                    \
@@ -519,7 +507,7 @@ static const struct kscan_driver_api kscan_matrix_api = {
         .rows = ARRAY_SIZE(kscan_matrix_rows_##n),                                                 \
         .cols = ARRAY_SIZE(kscan_matrix_cols_##n),                                                 \
         .outputs =                                                                                 \
-            KSCAN_GPIO_LIST(COND_DIODE_DIR(n, (kscan_matrix_rows_##n), (kscan_matrix_cols_##n))),  \
+            KSCAN_GPIO_LIST(kscan_matrix_rows_##n),                                                \
         .debounce_config =                                                                         \
             {                                                                                      \
                 .debounce_press_ms = INST_DEBOUNCE_PRESS_MS(n),                                    \
@@ -527,7 +515,6 @@ static const struct kscan_driver_api kscan_matrix_api = {
             },                                                                                     \
         .debounce_scan_period_ms = DT_INST_PROP(n, debounce_scan_period_ms),                       \
         .poll_period_ms = DT_INST_PROP(n, poll_period_ms),                                         \
-        .diode_direction = INST_DIODE_DIR(n),                                                      \
     };                                                                                             \
                                                                                                    \
     PM_DEVICE_DT_INST_DEFINE(n, kscan_matrix_pm_action);                                           \

@@ -68,7 +68,6 @@
         compatible = "zmk,kscan-gpio-adc";
         wakeup-source;
 
-        diode-direction = "col2row";
         adc-gpios
                   = <&gpio0 1 GPIO_ACTIVE_HIGH>
                   , <&gpio0 2 GPIO_ACTIVE_HIGH>
