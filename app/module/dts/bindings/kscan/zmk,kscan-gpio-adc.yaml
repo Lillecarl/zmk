@@ -8,6 +8,9 @@ compatible: "zmk,kscan-gpio-adc"
 include: kscan.yaml
 
 properties:
+  io-channels:
+    required: true
+    description: Single ADC channel coming from the Mux.
   mux-enable-gpios:
     type: phandle-array
     description: Mux enable pin.

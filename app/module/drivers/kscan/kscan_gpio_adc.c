@@ -63,6 +63,9 @@ struct kscan_matrix_data {
     struct kscan_gpio_list inputs;
     kscan_callback_t callback;
     struct k_work_delayable work;
+    const struct device *adc;
+    // struct adc_channel_cfg acc;
+    // struct adc_sequence as;
 #if USE_INTERRUPTS
     /** Array of length config->inputs.len */
     struct kscan_matrix_irq_callback *irqs;
@@ -79,6 +82,7 @@ struct kscan_matrix_data {
 struct kscan_matrix_config {
     struct kscan_gpio_list outputs;
     struct zmk_debounce_config debounce_config;
+    uint8_t io_channel;
     const struct gpio_dt_spec mux_enable;
     size_t rows;
     size_t cols;
@@ -516,12 +520,14 @@ static const struct kscan_driver_api kscan_matrix_api = {
         (static struct kscan_matrix_irq_callback kscan_matrix_irqs_##n[INST_INPUTS_LEN(n)];))      \
                                                                                                    \
     static struct kscan_matrix_data kscan_matrix_data_##n = {                                      \
+        /*.adc = DEVICE_DT_GET(DT_IO_CHANNELS_CTLR(DT_DRV_INST(n))),*/                                 \
         .inputs =                                                                                  \
             KSCAN_GPIO_LIST(kscan_matrix_cols_##n),                                                \
         .matrix_state = kscan_matrix_state_##n,                                                    \
         COND_INTERRUPTS((.irqs = kscan_matrix_irqs_##n, ))};                                       \
                                                                                                    \
     static const struct kscan_matrix_config kscan_matrix_config_##n = {                            \
+        .io_channel = DT_IO_CHANNELS_INPUT(DT_DRV_INST(n)),                                        \
         .mux_enable = GPIO_DT_SPEC_INST_GET(n, mux_enable_gpios),                                  \
         .rows = ARRAY_SIZE(kscan_matrix_rows_##n),                                                 \
         .cols = ARRAY_SIZE(kscan_matrix_cols_##n),                                                 \
