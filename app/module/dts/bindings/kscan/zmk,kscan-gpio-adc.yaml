@@ -8,9 +8,13 @@ compatible: "zmk,kscan-gpio-adc"
 include: kscan.yaml
 
 properties:
+  mux-enable-gpios:
+    type: phandle-array
+    description: Mux enable pin.
   adc-gpios:
     type: phandle-array
     required: true
+    description: Mux select pins. Only exactly 3 supported.
   col-gpios:
     type: phandle-array
     required: true

@@ -79,6 +79,7 @@ struct kscan_matrix_data {
 struct kscan_matrix_config {
     struct kscan_gpio_list outputs;
     struct zmk_debounce_config debounce_config;
+    const struct gpio_dt_spec mux_enable;
     size_t rows;
     size_t cols;
     int32_t debounce_scan_period_ms;
@@ -397,6 +398,7 @@ static int kscan_matrix_init_outputs(const struct device *dev) {
 
 static int kscan_matrix_disconnect_inputs(const struct device *dev) {
     const struct kscan_matrix_data *data = dev->data;
+    const struct kscan_matrix_config *config = dev->config;
 
     for (int i = 0; i < data->inputs.len; i++) {
         const struct gpio_dt_spec *gpio = &data->inputs.gpios[i].spec;
@@ -405,6 +407,8 @@ static int kscan_matrix_disconnect_inputs(const struct device *dev) {
             return err;
         }
     }
+
+    gpio_pin_set_dt(&config->mux_enable, 1);
 
     return 0;
 }
@@ -425,10 +429,24 @@ static int kscan_matrix_disconnect_outputs(const struct device *dev) {
 
 #endif // IS_ENABLED(CONFIG_PM_DEVICE)
 
-static void kscan_matrix_setup_pins(const struct device *dev) {
+static int kscan_matrix_setup_pins(const struct device *dev) {
+    const struct kscan_matrix_config *config = dev->config;
+    const struct gpio_dt_spec *mux_enable = &config->mux_enable;
     kscan_matrix_init_inputs(dev);
     kscan_matrix_init_outputs(dev);
     kscan_matrix_set_all_outputs(dev, 0);
+
+    if (!device_is_ready(mux_enable->port)) {
+        LOG_ERR("mux_enable GPIO is not ready");
+        return -ENODEV;
+    }
+    int err = gpio_pin_configure_dt(mux_enable, GPIO_OUTPUT);
+    if (err) {
+        LOG_ERR("Unable to configure mux_enable pin for output");
+        return err;
+    }
+    gpio_pin_set_dt(&config->mux_enable, 0);
+    return 0;
 }
 
 static int kscan_matrix_init(const struct device *dev) {
@@ -504,6 +522,7 @@ static const struct kscan_driver_api kscan_matrix_api = {
         COND_INTERRUPTS((.irqs = kscan_matrix_irqs_##n, ))};                                       \
                                                                                                    \
     static const struct kscan_matrix_config kscan_matrix_config_##n = {                            \
+        .mux_enable = GPIO_DT_SPEC_INST_GET(n, mux_enable_gpios),                                  \
         .rows = ARRAY_SIZE(kscan_matrix_rows_##n),                                                 \
         .cols = ARRAY_SIZE(kscan_matrix_cols_##n),                                                 \
         .outputs =                                                                                 \
