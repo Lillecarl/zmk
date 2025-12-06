@@ -69,9 +69,31 @@
         wakeup-source;
 
         diode-direction = "col2row";
-        row-gpios = <&gpio0 1 GPIO_ACTIVE_HIGH>;
+        row-gpios
+                  = <&gpio0 1 GPIO_ACTIVE_HIGH>
+                  , <&gpio0 2 GPIO_ACTIVE_HIGH>
+                  , <&gpio0 3 GPIO_ACTIVE_HIGH>
+                  ;
+        // mux-enable = <&gpio0 4 GPIO_ACTIVE_HIGH>;
 
-        col-gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
+        col-gpios
+                  = <&gpio0  8 GPIO_ACTIVE_HIGH>  // KSO0
+                  , <&gpio0  9 GPIO_ACTIVE_HIGH>  // KSO1
+                  , <&gpio0 10 GPIO_ACTIVE_HIGH>  // KSO2
+                  , <&gpio0 11 GPIO_ACTIVE_HIGH>  // KSO3
+                  , <&gpio0 12 GPIO_ACTIVE_HIGH>  // KSO4
+                  , <&gpio0 13 GPIO_ACTIVE_HIGH>  // KSO5
+                  , <&gpio0 14 GPIO_ACTIVE_HIGH>  // KSO6
+                  , <&gpio0 15 GPIO_ACTIVE_HIGH>  // KSO7
+                  , <&gpio0 21 GPIO_ACTIVE_HIGH>  // KSO8
+                  , <&gpio0 20 GPIO_ACTIVE_HIGH>  // KSO9
+                  , <&gpio0 19 GPIO_ACTIVE_HIGH>  // KSO10
+                  , <&gpio0 18 GPIO_ACTIVE_HIGH>  // KSO11
+                  , <&gpio0 17 GPIO_ACTIVE_HIGH>  // KSO12
+                  , <&gpio0 16 GPIO_ACTIVE_HIGH>  // KSO13
+                  , <&gpio0 23 GPIO_ACTIVE_HIGH>  // KSO14
+                  , <&gpio0 22 GPIO_ACTIVE_HIGH>  // KSO15
+                  ;
     };
 
     // TODO: Implement analog key scanning with SGM48751 MUX
