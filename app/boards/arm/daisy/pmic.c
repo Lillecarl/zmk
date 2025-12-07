@@ -101,6 +101,7 @@ void stop_blinking_led(void)
 #define SET_GREEN  set_rgb_color(  0, BRT,   0)
 #define SET_BLUE   set_rgb_color(  0,   0, BRT)
 #define SET_AMBER  set_rgb_color(BRT, BRT,   0)
+#define SET_DARK_AMBER set_rgb_color(BRT*3/2, BRT,   0)
 #define SET_PURPLE set_rgb_color(BRT,   0, BRT)
 #define SET_CYAN   set_rgb_color(  0, BRT, BRT)
 #define SET_WHITE  set_rgb_color(BRT, BRT, BRT)
@@ -132,8 +133,8 @@ void update_power_led(void)
 	// | >= 90%        | Yes        | White  | Fully charged       |
 	if (conn_state == ZMK_USB_CONN_NONE) {
 		if (soc == 0) {
-			// Purple
-			SET_PURPLE;
+			// Purple - For debugging only. Happens during startup
+			// SET_PURPLE;
 		} else if (soc < 10) {
 			// Red
 			SET_RED;
@@ -143,11 +144,12 @@ void update_power_led(void)
 		}
 	} else {
 		if (soc == 0) {
-			// Green
-			SET_GREEN;
+			// Green - For debugging only
+			// SET_GREEN;
 		} else if (soc < 10) {
-			// Blue
-			SET_BLUE;
+			// Blue - For debugging only
+			// SET_BLUE;
+			SET_DARK_AMBER;
 		} else if (soc < 90) {
 			// Amber
 			SET_AMBER;
