@@ -117,6 +117,14 @@ void set_rgb_color(uint8_t r, uint8_t g, uint8_t b)
     led_set_brightness(rgb_leds, 2, b);
 }
 
+void check_protocol_switch()
+{
+	protocol_switch_usb = gpio_pin_get_raw(protocol_switch.port, protocol_switch.pin);
+	printk("daisy: update_ble_leds: %s (%d)\n", protocol_switch_usb ? "USB" : "BLE", protocol_switch_usb);
+
+	zmk_ble_adv_enabled_set(!protocol_switch_usb);
+}
+
 void update_power_led(void)
 {
 	uint8_t soc = zmk_battery_state_of_charge();
@@ -173,7 +181,7 @@ ZMK_SUBSCRIPTION(led_battery_listener, zmk_battery_state_changed);
 
 void update_ble_leds(void)
 {
-	printk("daisy: update_ble_leds: %s (%d)\n", protocol_switch_usb ? "USB" : "BLE", protocol_switch_usb);
+	check_protocol_switch();
 	/* Stop all blinking and turn all LEDs off. Start clean */
 	stop_blinking_led();
 	for (int i = 0; i < 3; i++) {
@@ -292,8 +300,6 @@ static int on_led_binding_pressed(struct zmk_behavior_binding *binding, struct z
 {
 	protocol_switch_usb = binding->param1;
 	printk("daisy: Changed mode switch behavior %d. Current transport: %d\n", protocol_switch_usb, zmk_endpoints_selected().transport);
-	protocol_switch_usb = gpio_pin_get_dt(&protocol_switch);
-	printk("daisy: gpio: %s (%d)\n", protocol_switch_usb ? "USB" : "BLE", protocol_switch_usb);
 	protocol_switch_usb = gpio_pin_get_raw(protocol_switch.port, protocol_switch.pin);
 	printk("daisy: gpio RAW: %s (%d)\n", protocol_switch_usb ? "USB" : "BLE", protocol_switch_usb);
 
