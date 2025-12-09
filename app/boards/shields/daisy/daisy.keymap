@@ -89,7 +89,7 @@
                 // | SHIFT       |  Z  |  X   |  C   |  V   |  B   |  N   |  M    |  ,    |  .   |   /    | SHIFT          |
                 // | CTRL  | FN  | GUI | ALT  | CTRL |        SPACE                | ALT  | CTRL | LEFT   | UP     | RIGHT |
                 // |                                                                                      | DOWN   |
-                &kp ESC   &kp C_MUTE &kp C_VOL_DN &kp C_VOL_UP &kp C_PREV &kp C_PP &kp C_NEXT &kp C_BRI_DN &kp C_BRI_UP &disp &kp R_AIR &kp PSCRN &kp C_AL_CCC &kp DEL
+                &kp ESC   &kp C_MUTE &kp C_VOL_DN &kp C_VOL_UP &kp C_PREV &kp C_PP &kp C_NEXT &kp C_BRI_DN &kp C_BRI_UP &disp TODO &kp PSCRN &kp C_AL_CCC &kp DEL
                 &kp GRAVE &kp N1 &kp N2   &kp N3   &kp N4   &kp N5   &kp N6   &kp N7   &kp N8   &kp N9    &kp N0    &kp MINUS &kp EQUAL &kp BSPC
                 &kp TAB   &kp Q  &kp W    &kp E    &kp R    &kp T    &kp Y    &kp U    &kp I    &kp O     &kp P     &kp LBKT  &kp RBKT  &kp BSLH
                 &kp CAPS  &kp A  &kp S    &kp D    &kp F    &kp G    &kp H    &kp J    &kp K    &kp L     &kp SEMI  &kp SQT   &kp RET
@@ -155,7 +155,7 @@
                 // |             |     |      |      |      |      |      |       |       |      |        |                |
                 // |       |     |     |      |      |                             |      |      | HOME   | PG UP  | END   |
                 // |                                                                                      | PG DN  |
-                &tog FNLK &kp C_MUTE &kp C_VOL_DN &kp C_VOL_UP &kp C_PREV &kp C_PP &kp C_NEXT &kp C_BRI_DN &kp C_BRI_UP &disp &kp R_AIR &kp PSCRN &kp C_AL_CCC &kp DEL
+                &tog FNLK &kp C_MUTE &kp C_VOL_DN &kp C_VOL_UP &kp C_PREV &kp C_PP &kp C_NEXT &kp C_BRI_DN &kp C_BRI_UP &disp TODO &kp PSCRN &kp C_AL_CCC &kp DEL
                 ______    ______ ______   ______   ______   ______   ______   ______   ______   ______    ______    ______    ______    &sys_reset
                 ______    ______ ______   ______   ______   ______   ______   ______   ______   ______    &kp PAUSE ______    ______    ______
                 ______    ______ ______   ______   ______   ______   ______   ______   ______   ______    ______    ______    ______
