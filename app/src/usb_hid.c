@@ -100,12 +100,6 @@ static int get_report_cb(const struct device *dev, struct usb_setup_packet *setu
             *len = sizeof(*report);
             break;
         }
-        case ZMK_HID_REPORT_ID_RADIO: {
-            struct zmk_hid_radio_report *report = zmk_hid_get_radio_report();
-            *data = (uint8_t *)report;
-            *len = sizeof(*report);
-            break;
-        }
         default:
             LOG_ERR("Invalid report ID %d requested", setup->wValue & HID_GET_REPORT_ID_MASK);
             return -EINVAL;
@@ -225,17 +219,6 @@ int zmk_usb_hid_send_consumer_report(void) {
 #endif /* IS_ENABLED(CONFIG_ZMK_USB_BOOT) */
 
     struct zmk_hid_consumer_report *report = zmk_hid_get_consumer_report();
-    return zmk_usb_hid_send_report((uint8_t *)report, sizeof(*report));
-}
-
-int zmk_usb_hid_send_radio_report(void) {
-#if IS_ENABLED(CONFIG_ZMK_USB_BOOT)
-    if (hid_protocol == HID_PROTOCOL_BOOT) {
-        return -ENOTSUP;
-    }
-#endif /* IS_ENABLED(CONFIG_ZMK_USB_BOOT) */
-
-    struct zmk_hid_radio_report *report = zmk_hid_get_radio_report();
     return zmk_usb_hid_send_report((uint8_t *)report, sizeof(*report));
 }
 
