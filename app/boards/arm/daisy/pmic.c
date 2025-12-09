@@ -206,10 +206,10 @@ void update_ble_leds(void)
 			led_on(pmic_leds, led_index);
 		} else if (zmk_ble_active_profile_is_open()) {
 			/* Fast blink if nothing paired */
-			start_blinking_led(led_index, 700);
+			start_blinking_led(led_index, 500);
 		} else {
 			/* Slow blink if paired but not connected */
-			start_blinking_led(led_index, 1400);
+			start_blinking_led(led_index, 1500);
 		}
 	}
 }
