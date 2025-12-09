@@ -3,6 +3,8 @@
 set(OPENOCD_NRF5_SUBFAMILY nrf52)
 board_runner_args(jlink "--device=nRF52840_xxAA" "--speed=4000")
 board_runner_args(pyocd "--target=nrf52840" "--frequency=4000000")
+board_runner_args(uf2 "--board-id=nRF52840-FlowerDaisyKB-v1")
+include(${ZEPHYR_BASE}/boards/common/uf2.board.cmake)
 include(${ZEPHYR_BASE}/boards/common/nrfjprog.board.cmake)
 include(${ZEPHYR_BASE}/boards/common/nrfutil.board.cmake)
 include(${ZEPHYR_BASE}/boards/common/jlink.board.cmake)
