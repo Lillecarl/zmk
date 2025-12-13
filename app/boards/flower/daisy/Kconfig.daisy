@@ -1,0 +1,10 @@
+# Daisy board configuration
+
+# Copyright (c) 2026 Framework Computer Inc
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_DAISY
+        select SOC_NRF52840_QIAA
+        imply RETAINED_MEM
+        imply RETENTION
+        imply RETENTION_BOOT_MODE

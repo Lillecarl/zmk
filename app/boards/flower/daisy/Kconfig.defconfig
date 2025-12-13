@@ -1,12 +1,16 @@
 # Daisy board configuration
 
-# Copyright (c) 2016 Nordic Semiconductor ASA
+# Copyright (c) 2026 Framework Computer Inc
 # SPDX-License-Identifier: Apache-2.0
 
 if BOARD_DAISY
 
-config BOARD
-	default "daisy"
+if USB_DEVICE_STACK
+
+config USB_NRFX
+    default y
+
+endif # USB_DEVICE_STACK
 
 config BT_CTLR
 	default BT
