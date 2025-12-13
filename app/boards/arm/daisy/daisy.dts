@@ -181,8 +181,9 @@
 			current-microamp = <240000>;
 			/* Maximum discharge current 1200mA (1C) */
 			/* Below 0degC only 240mA (0.2C) are allowed */
-			/* Fow now set to 600mA (0.5C)   are allowed */
-			dischg-limit-microamp = <600000>;
+			/* npm1300 only allows 200mA or 1A */
+			/* Fow now set to 1A, but 200mA is probably enough */
+			dischg-limit-microamp = <1000000>;
 			/* 1.5A VBUS limit for Type-C without PD negotiation */
 			vbus-limit-microamp = <1500000>;
 			/* NTC Thermistor */
