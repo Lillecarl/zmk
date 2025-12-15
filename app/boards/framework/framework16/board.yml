@@ -1,0 +1,5 @@
+board:
+  name: framework16
+  vendor: framework
+  socs:
+    - name: rp2040
