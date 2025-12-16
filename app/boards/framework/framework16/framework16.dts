@@ -187,15 +187,19 @@
     };
 };
 
-&i2c0 {
+&i2c1 {
+    /* IS31FL3743A supports 1MHz clock */
+    clock-frequency = <I2C_BITRATE_STANDARD>;
     status = "okay";
-    /* TODO: They're actually IS31FL3743A */
+    pinctrl-0 = <&i2c1_default>;
+    pinctrl-names = "default";
+
     /* Macropad has a single controller */
-    led_ctrl1: is31fl3733@20 {
-        status = "disabled";
+    led_ctrl1: is31fl3743@20 {
+        status = "okay";
         reg = <0x20>;
         compatible = "issi,is31fl3733";
-        sdb-gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;
+        sdb-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;
     };
     /* RGB Keyboard has a second controller */
     led_ctrl2: is31fl3733@23 {

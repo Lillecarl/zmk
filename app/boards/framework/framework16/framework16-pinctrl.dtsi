@@ -5,7 +5,7 @@
 #include <zephyr/dt-bindings/pinctrl/rpi-pico-rp2040-pinctrl.h>
 
 &pinctrl {
-	i2c0_default: i2c0_default {
+	i2c1_default: i2c1_default {
 		group1 {
 			pinmux =
 				  <RP2XXX_PINMUX(26, RP2_PINCTRL_GPIO_FUNC_I2C)>
