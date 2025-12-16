@@ -11,8 +11,6 @@
 #include <zephyr/dt-bindings/i2c/i2c.h>
 #include "framework16-pinctrl.dtsi"
 
-#include <layouts/common/65percent/ansi.dtsi>
-
 / {
     chosen {
         zephyr,sram = &sram0;
@@ -73,7 +71,7 @@
     };
 
     // TODO
-    ansi_transform: macropad_transform {
+    ansi_transform: ansi_transform {
         compatible = "zmk,matrix-transform";
         columns = <16>;
         rows = <8>;
@@ -89,7 +87,7 @@
         >;
     };
 
-    numpad_transform: macropad_transform {
+    numpad_transform: numpad_transform {
         compatible = "zmk,matrix-transform";
         columns = <8>;
         rows = <4>;
