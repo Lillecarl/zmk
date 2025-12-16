@@ -7,6 +7,7 @@
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/sys_io.h>
 #include <zmk/backlight.h>
+#include <zmk/rgb_underglow.h>
 
 int startup(void)
 {
@@ -27,6 +28,8 @@ int startup(void)
 	/* Turn backlight brightness to 100% */
 	zmk_backlight_on();
 	zmk_backlight_set_brt(100);
+
+	zmk_rgb_underglow_on();
 
 	return 0;
 }

@@ -26,6 +26,7 @@
         // zmk,matrix-transform = &numpad_transform;
         zmk,matrix-transform = &macropad_transform;
         zmk,backlight = &backlight_pwm;
+        zmk,underglow = &virtual_strip;
     };
 
     aliases {
@@ -33,6 +34,27 @@
         pwm-led0 = &backlight_pwm;
     };
 
+    virtual_strip: virtual_strip {
+        compatible = "led-to-led-strip";
+
+        /* Link to the real LED controller */
+        led-controller = <&led_ctrl1>;
+
+        /* Length of the virtual strip */
+        chain-length = <198>;
+
+        /* * MAPPING:
+         * Define which LED controller channels correspond to [R, G, B] for each pixel.
+         * Format: <Pixel0_R Pixel0_G Pixel0_B Pixel1_R Pixel1_G Pixel1_B ...>
+         */
+        // color-map = <
+        //     0  1  2    /* Pixel 0 uses channels 0,1,2 */
+        //     3  4  5    /* Pixel 1 uses channels 3,4,5 */
+        // >;
+
+        /* Needed for the led_strip API constraints */
+        //in-gpios = <>; /* Dummy, usually required by bindings validation or ignored */
+    };
 
     leds {
         compatible = "gpio-leds";
@@ -195,21 +217,24 @@
     pinctrl-names = "default";
 
     /* Macropad has a single controller */
-    led_ctrl1: is31fl3743@20 {
+    led_ctrl1: is31fl3743_1@20 {
         status = "okay";
         reg = <0x20>;
-        compatible = "issi,is31fl3733";
+        compatible = "issi,is31fl3743";
         sdb-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;
+        /* REQUIRED: Set global current limit (0-255) */
+        current-limit = <255>;
+        /* OPTIONAL: Set sync mode ("disabled", "master", "slave") */
+        sync-mode = "none";
     };
     /* RGB Keyboard has a second controller */
-    led_ctrl2: is31fl3733@23 {
+    led_ctrl2: is31fl3743_2@23 {
         status = "disabled";
         reg = <0x23>;
-        compatible = "issi,is31fl3733";
-        sdb-gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;
+        compatible = "issi,is31fl3743";
+        sdb-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;
     };
 };
-
 
 zephyr_udc0: &usbd {
     status = "okay";
