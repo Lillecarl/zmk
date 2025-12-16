@@ -20,7 +20,11 @@
         zephyr,flash-controller = &ssi;
         zephyr,code-partition = &code_partition;
         zmk,kscan = &kscan0;
-        zmk,physical-layout = &layout_65_ansi;
+        // zmk,matrix-transform = &ansi_transform;
+        // zmk,matrix-transform = &iso_transform;
+        // zmk,matrix-transform = &jis_transform;
+        // zmk,matrix-transform = &numpad_transform;
+        zmk,matrix-transform = &macropad_transform;
         zmk,backlight = &backlight_pwm;
     };
 
@@ -46,13 +50,50 @@
         };
     };
 
-    default_transform: keymap_transform_0 {
+    // TODO
+    ansi_transform: macropad_transform {
         compatible = "zmk,matrix-transform";
         columns = <16>;
         rows = <8>;
-        /* TODO Map key matrix */
         map = <
-          RC(0,0)
+          // (row, col)
+          RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)
+          RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)
+          RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)
+          RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)
+          RC(0,0)           RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)
+          RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)                    RC(0,0)                    RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)  RC(0,0)
+                                                                                                                      RC(0,0)
+        >;
+    };
+
+    numpad_transform: macropad_transform {
+        compatible = "zmk,matrix-transform";
+        columns = <8>;
+        rows = <4>;
+        map = <
+          // (row, col)
+          RC(2,1) RC(2,2) RC(3,4) RC(2,4)
+          RC(0,0) RC(0,4) RC(1,1) RC(1,6)
+          RC(0,1) RC(0,5) RC(1,2)
+          RC(0,2) RC(0,6) RC(1,3) RC(1,7)
+          RC(0,3) RC(0,7) RC(1,4)
+          RC(1,0)         RC(1,5) RC(2,0)
+        >;
+    };
+
+    macropad_transform: macropad_transform {
+        compatible = "zmk,matrix-transform";
+        columns = <8>;
+        rows = <4>;
+        map = <
+          // (row, col)
+          RC(2,1) RC(2,2) RC(3,4) RC(2,4)
+          RC(0,0) RC(0,4) RC(1,1) RC(1,6)
+          RC(0,1) RC(0,5) RC(1,2) RC(2,5)
+          RC(0,2) RC(0,6) RC(1,3) RC(1,7)
+          RC(0,3) RC(0,7) RC(1,4) RC(2,6)
+          RC(1,0) RC(2,7) RC(1,5) RC(2,0)
         >;
     };
 
@@ -186,10 +227,6 @@ zephyr_udc0: &usbd {
 	status = "okay";
 	pinctrl-0 = <&adc_default>;
 	pinctrl-names = "default";
-};
-
-&layout_65_ansi {
-    transform = <&default_transform>;
 };
 
 &timer {
