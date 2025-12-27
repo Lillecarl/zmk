@@ -137,7 +137,7 @@
         compatible = "zmk,kscan-gpio-adc";
         wakeup-source;
 
-	io-channels = <&adc 0>;
+	io-channels = <&adc 2>;
 
         adc-gpios
                   = <&gpio0 1 GPIO_ACTIVE_HIGH>
@@ -269,6 +269,17 @@ zephyr_udc0: &usbd {
 	status = "okay";
 	pinctrl-0 = <&adc_default>;
 	pinctrl-names = "default";
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@2 {
+		reg = <2>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
 };
 
 &timer {

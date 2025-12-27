@@ -25,6 +25,7 @@
 		group1 {
 			pinmux = <ADC_CH2_P28>;
 			input-enable;
+			bias-pull-up;
 		};
 	};
 };
