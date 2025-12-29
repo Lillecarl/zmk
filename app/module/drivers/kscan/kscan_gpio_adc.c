@@ -53,9 +53,8 @@ struct kscan_matrix_data {
     kscan_callback_t callback;
     struct k_work_delayable work;
     
-    struct adc_channel_cfg adc_cfg;
     struct adc_sequence adc_seq;
-    int16_t adc_buffer;
+    uint16_t adc_buffer;
 
     int64_t scan_time;
     struct zmk_debounce_state *matrix_state;
@@ -68,8 +67,7 @@ struct kscan_matrix_config {
     struct kscan_gpio_list adc_gpios;
     struct zmk_debounce_config debounce_config;
     
-    const struct device *adc_dev;
-    uint8_t io_channel;
+    struct adc_dt_spec io_channel;
     
     const struct gpio_dt_spec mux_enable;
     size_t rows;
@@ -103,9 +101,13 @@ static int read_adc_mv(const struct device *dev) {
     struct kscan_matrix_data *data = dev->data;
     const struct kscan_matrix_config *config = dev->config;
     
-    int err = adc_read(config->adc_dev, &data->adc_seq);
+    int err = adc_read_dt(&config->io_channel, &data->adc_seq);
+    if (err < 0) return 3300;
+
+    err = adc_raw_to_millivolts_dt(&config->io_channel, &data->adc_buffer);
     if (err < 0) return 3300; 
-    return (data->adc_buffer * 3300) / 4096;
+
+    return data->adc_buffer;
 }
 
 static void kscan_matrix_read_continue(const struct device *dev) {
@@ -126,8 +128,6 @@ static void kscan_matrix_read_end(const struct device *dev) {
 static int kscan_matrix_read(const struct device *dev) {
     struct kscan_matrix_data *data = dev->data;
     const struct kscan_matrix_config *config = dev->config;
-    
-    if (!device_is_ready(config->adc_dev)) return -ENODEV;
 
     data->scan_count++;
     uint16_t voltages[8][16]; 
@@ -257,23 +257,20 @@ static int kscan_matrix_init(const struct device *dev) {
     }
 
     // 4. ADC
-    if (!device_is_ready(config->adc_dev)) {
+    if (!adc_is_ready_dt(&config->io_channel)) {
         printk("KSCAN ERROR: ADC Not Ready\n");
         return -ENODEV;
     }
     printk("KSCAN CFG: ADC OK\n");
 
     // ADC Setup
-    data->adc_cfg.gain = ADC_GAIN_1;
-    data->adc_cfg.reference = ADC_REF_INTERNAL;
-    data->adc_cfg.acquisition_time = ADC_ACQ_TIME_DEFAULT;
-    data->adc_cfg.channel_id = config->io_channel;
-    data->adc_seq.channels = BIT(config->io_channel);
     data->adc_seq.buffer = &data->adc_buffer;
     data->adc_seq.buffer_size = sizeof(data->adc_buffer);
-    data->adc_seq.resolution = 12;
 
-    err = adc_channel_setup(config->adc_dev, &data->adc_cfg);
+    err = adc_channel_setup_dt(&config->io_channel);
+    if (err) return err;
+
+    err = adc_sequence_init_dt(&config->io_channel, &data->adc_seq);
     if (err) return err;
 
     printk("KSCAN: Init Complete\n");
@@ -319,8 +316,7 @@ static const struct kscan_driver_api kscan_matrix_api = {
     static struct zmk_debounce_state kscan_matrix_state_##n[INST_MATRIX_LEN(n)]; \
     static struct kscan_matrix_data kscan_matrix_data_##n = { .matrix_state = kscan_matrix_state_##n }; \
     static const struct kscan_matrix_config kscan_matrix_config_##n = { \
-        .io_channel = DT_IO_CHANNELS_INPUT(DT_DRV_INST(n)), \
-        .adc_dev = DEVICE_DT_GET(DT_IO_CHANNELS_CTLR(DT_DRV_INST(n))), \
+        .io_channel = ADC_DT_SPEC_INST_GET(n), \
         .mux_enable = GPIO_DT_SPEC_INST_GET(n, mux_enable_gpios), \
         .cols = ARRAY_SIZE(kscan_matrix_cols_##n), \
         .rows = INST_ROWS_LEN(n), \
