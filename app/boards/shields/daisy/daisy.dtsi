@@ -81,14 +81,14 @@
         , <&gpio0 11 GPIO_ACTIVE_HIGH> // KSO7 Button 1
         , <&gpio0 12 GPIO_ACTIVE_HIGH> // KSO8 Button 2
         , <&gpio0 16 GPIO_ACTIVE_HIGH> // KSO9 LED 4
-        , <&gpio0 17 GPIO_ACTIVE_HIGH> // KS10 QSPI CS
-        , <&gpio0 19 GPIO_ACTIVE_HIGH> // KS11 QSPI SCLK
-        , <&gpio0 20 GPIO_ACTIVE_HIGH> // KS12 QSPI_DIO0
-        , <&gpio0 21 GPIO_ACTIVE_HIGH> // KS13 QSPI_DIO1
-        , <&gpio0 22 GPIO_ACTIVE_HIGH> // KS14 QSPI_DIO2
-        , <&gpio0 23 GPIO_ACTIVE_HIGH> // KS15 QSPI_DIO3
-        , <&gpio0 24 GPIO_ACTIVE_HIGH> // KS16 Button 3
-        , <&gpio0 25 GPIO_ACTIVE_HIGH> // KS17 Button 4
+        , <&gpio0 17 GPIO_ACTIVE_HIGH> // KSO10 QSPI CS
+        , <&gpio0 19 GPIO_ACTIVE_HIGH> // KSO11 QSPI SCLK
+        , <&gpio0 20 GPIO_ACTIVE_HIGH> // KSO12 QSPI_DIO0
+        , <&gpio0 21 GPIO_ACTIVE_HIGH> // KSO13 QSPI_DIO1
+        , <&gpio0 22 GPIO_ACTIVE_HIGH> // KSO14 QSPI_DIO2
+        , <&gpio0 23 GPIO_ACTIVE_HIGH> // KSO15 QSPI_DIO3
+        , <&gpio0 24 GPIO_ACTIVE_HIGH> // KSO16 Button 3
+        , <&gpio0 25 GPIO_ACTIVE_HIGH> // KSO17 Button 4
         ;
 
         row-gpios
