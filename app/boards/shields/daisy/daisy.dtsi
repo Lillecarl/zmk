@@ -43,7 +43,7 @@
         };
 
         matrix {
-            kscan = <&kscan1>;
+            kscan = <&kscan2>;
         };
     };
 
@@ -56,6 +56,12 @@
 	    // Bistable switch with low and high position
             , <&gpio1 14 (GPIO_ACTIVE_LOW)>
             ;
+    };
+
+    kscan2: kscan_deghost {
+        compatible = "zmk,kscan-deghost";
+        kscan = <&kscan1>;
+        transform = <&matrix_transform>;
     };
 
     kscan1: kscan_matrix {
