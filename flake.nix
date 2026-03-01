@@ -1,3 +1,6 @@
+# nix develop . -c west init -l app
+# nix develop . -c west update
+# nix develop . -c west build -s app -p -b daisy  -- -DSHIELD=daisy
 {
   description = "ZMK firmware development environment";
 
