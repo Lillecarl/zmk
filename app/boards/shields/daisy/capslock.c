@@ -5,6 +5,8 @@
 #include <zmk/events/hid_indicators_changed.h>
 #include <zmk/hid_indicators.h>
 
+#if DT_NODE_EXISTS(DT_NODELABEL(caps_led))
+
 #define CAPS_LED DT_NODELABEL(caps_led)
 static const struct gpio_dt_spec caps_led = GPIO_DT_SPEC_GET(CAPS_LED, gpios);
 
@@ -23,3 +25,5 @@ static int led_keylock_listener_cb(const zmk_event_t *eh) {
 
 ZMK_LISTENER(led_indicators_listener, led_keylock_listener_cb);
 ZMK_SUBSCRIPTION(led_indicators_listener, zmk_hid_indicators_changed);
+
+#endif /* DT_NODE_EXISTS(DT_NODELABEL(caps_led)) */

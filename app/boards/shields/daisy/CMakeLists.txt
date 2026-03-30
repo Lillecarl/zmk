@@ -1,3 +1,4 @@
+zephyr_library_include_directories(${CMAKE_SOURCE_DIR}/include)
 if(CONFIG_BOARD_DAISY)
   zephyr_library_sources(layout.c)
 endif()
