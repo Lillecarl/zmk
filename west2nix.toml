@@ -33,7 +33,7 @@ hash = "sha256-Cfw1htCp3xZt1R+X3kW3e9shEcMGbeBbEqpDoyLJV3s="
 [[manifest.projects]]
 name = "zephyr-hid-touchpad-module"
 url = "git@github.com:FrameworkComputer/zephyr-hid-touchpad-module"
-revision = "cb95adc4cb47cf06c2c794e70630633e532659b3"
+revision = "ca12a6f722c6b64b1fcf210ea61c6ff91a31431a"
 
 [manifest.projects.nix]
 hash = "sha256-9rgwHHCWiNZBqJYRje3jG2hTenREGwGx5l5CUtVXcbk="

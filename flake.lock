@@ -173,16 +173,16 @@
     "zephyr-hid-touchpad-module": {
       "flake": false,
       "locked": {
-        "lastModified": 1764085682,
-        "narHash": "sha256-9rgwHHCWiNZBqJYRje3jG2hTenREGwGx5l5CUtVXcbk=",
-        "ref": "main",
-        "rev": "cb95adc4cb47cf06c2c794e70630633e532659b3",
-        "revCount": 6,
+        "lastModified": 1772214726,
+        "narHash": "sha256-PtLiqUDertguf4skbPRtzDw3k4/BCWDhWGSUGoLTdRg=",
+        "ref": "passthrough",
+        "rev": "ca12a6f722c6b64b1fcf210ea61c6ff91a31431a",
+        "revCount": 10,
         "type": "git",
         "url": "ssh://git@github.com/FrameworkComputer/zephyr-hid-touchpad-module"
       },
       "original": {
-        "ref": "main",
+        "ref": "passthrough",
         "type": "git",
         "url": "ssh://git@github.com/FrameworkComputer/zephyr-hid-touchpad-module"
       }

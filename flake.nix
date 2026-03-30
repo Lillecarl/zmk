@@ -7,7 +7,7 @@
     zephyr.url = "git+ssh://git@github.com/FrameworkComputer/zephyr-private?ref=daisy-zephyr4.1";
     zephyr.flake = false;
 
-    zephyr-hid-touchpad-module.url = "git+ssh://git@github.com/FrameworkComputer/zephyr-hid-touchpad-module?ref=main";
+    zephyr-hid-touchpad-module.url = "git+ssh://git@github.com/FrameworkComputer/zephyr-hid-touchpad-module?ref=passthrough";
     zephyr-hid-touchpad-module.flake = false;
 
     zephyr-nix.url = "github:nix-community/zephyr-nix";
