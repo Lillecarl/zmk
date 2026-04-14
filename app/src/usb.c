@@ -135,7 +135,13 @@ static int zmk_usb_init(void) {
         return err;
     }
 
-    usbd_device_set_code_triple(&zmk_usbd, USBD_SPEED_FS, 0, 0, 0);
+    if (IS_ENABLED(CONFIG_USBD_CDC_ACM_CLASS)) {
+        /* CDC ACM uses IAD, which requires the Miscellaneous class code */
+        usbd_device_set_code_triple(&zmk_usbd, USBD_SPEED_FS,
+                                    USB_BCC_MISCELLANEOUS, 0x02, 0x01);
+    } else {
+        usbd_device_set_code_triple(&zmk_usbd, USBD_SPEED_FS, 0, 0, 0);
+    }
 
     err = usbd_msg_register_cb(&zmk_usbd, usbd_msg_cb);
     if (err) {
