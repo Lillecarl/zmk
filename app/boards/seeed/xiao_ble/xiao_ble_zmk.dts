@@ -15,6 +15,14 @@ sd_partition: &reserved_partition_0 { };
         zmk,battery = &vbatt;
     };
 
+    hid_dev_0: hid_dev_0 {
+        compatible = "zephyr,hid-device";
+        interface-name = "HID0";
+        protocol-code = "keyboard";
+        in-report-size = <64>;
+        in-polling-period-us = <1000>;
+    };
+
     vbatt: vbatt {
         compatible = "zmk,battery-voltage-divider";
         io-channels = <&adc 7>;

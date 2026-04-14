@@ -7,7 +7,6 @@
 #pragma once
 
 #include <zephyr/kernel.h>
-#include <zephyr/usb/usb_device.h>
 
 #include <zmk/event_manager.h>
 #include <zmk/usb.h>

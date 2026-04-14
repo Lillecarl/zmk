@@ -11,6 +11,11 @@ CONFIG_GPIO=y
 CONFIG_ZMK_USB=y
 CONFIG_ZMK_BLE=y
 
+# Disable the legacy USB device stack and its CDC ACM serial backend;
+# ZMK uses USB_DEVICE_STACK_NEXT instead.
+CONFIG_BOARD_SERIAL_BACKEND_CDC_ACM=n
+CONFIG_USB_DEVICE_STACK=n
+
 # Build UF2 by default, supported by the Adafruit nRF52 Bootloader
 CONFIG_BUILD_OUTPUT_UF2=y
 CONFIG_USE_DT_CODE_PARTITION=y

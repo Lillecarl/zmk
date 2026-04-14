@@ -134,25 +134,14 @@ menu "Output Types"
 config ZMK_USB
     bool "USB"
     depends on (!ZMK_SPLIT || (ZMK_SPLIT && ZMK_SPLIT_ROLE_CENTRAL))
-    select USB
-    select USB_DEVICE_STACK
-    select USB_DEVICE_HID
+    select USB_DEVICE_STACK_NEXT
+    select USBD_HID_SUPPORT
 
 config ZMK_USB_BOOT
     bool "USB Boot Protocol Support"
     depends on ZMK_USB
-    select USB_HID_BOOT_PROTOCOL
-
-config USB_DEVICE_INITIALIZE_AT_BOOT
-    default n
 
 if ZMK_USB
-
-config USB_NUMOF_EP_WRITE_RETRIES
-    default 10
-
-config USB_HID_POLL_INTERVAL_MS
-    default 1
 
 endif # ZMK_USB
 
@@ -490,7 +479,7 @@ rsource "src/boot/Kconfig"
 
 menu "Initialization Priorities"
 
-if USB_DEVICE_STACK
+if ZMK_USB
 
 config ZMK_USB_INIT_PRIORITY
     int "USB Init Priority"
@@ -500,7 +489,7 @@ config ZMK_USB_HID_INIT_PRIORITY
     int "USB HID Init Priority"
     default 95
 
-endif # USB
+endif # ZMK_USB
 
 if ZMK_BLE || ZMK_SPLIT_BLE
 
