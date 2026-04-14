@@ -159,6 +159,16 @@ static int set_report_cb(const struct device *dev, const uint8_t type, const uin
     }
 }
 
+static uint32_t idle_duration;
+
+static void set_idle_cb(const struct device *dev, const uint8_t id, const uint32_t duration) {
+    idle_duration = duration;
+}
+
+static uint32_t get_idle_cb(const struct device *dev, const uint8_t id) {
+    return idle_duration;
+}
+
 static void set_protocol_cb(const struct device *dev, const uint8_t proto) {
     LOG_INF("Protocol changed to %s", proto == 0U ? "Boot" : "Report");
 #if IS_ENABLED(CONFIG_ZMK_USB_BOOT)
@@ -170,6 +180,8 @@ static struct hid_device_ops ops = {
     .iface_ready = iface_ready_cb,
     .get_report = get_report_cb,
     .set_report = set_report_cb,
+    .set_idle = set_idle_cb,
+    .get_idle = get_idle_cb,
     .set_protocol = set_protocol_cb,
 };
 
