@@ -34,6 +34,10 @@ sd_partition: &reserved_partition_0 { };
 
 &xiao_serial { status = "disabled"; };
 
+/* Disable the board-level CDC ACM UART; the zmk-usb-logging snippet
+ * provides its own instance when USB logging is enabled. */
+&board_cdc_acm_uart { status = "disabled"; };
+
 &adc {
     status = "okay";
 };
