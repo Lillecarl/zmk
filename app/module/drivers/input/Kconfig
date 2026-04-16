@@ -13,6 +13,21 @@ config ZMK_INPUT_GPIO_MATRIX
     select GPIO
     select ZMK_DEBOUNCE
 
+config ZMK_INPUT_GPIO_DIRECT
+    bool "Direct GPIO input driver"
+    default y
+    depends on DT_HAS_ZMK_INPUT_GPIO_DIRECT_ENABLED
+    select INPUT
+    select GPIO
+    select ZMK_DEBOUNCE
+
+if ZMK_INPUT_GPIO_DIRECT
+
+config ZMK_INPUT_DIRECT_POLLING
+    bool "Poll for key event triggers instead of using interrupts on direct GPIO boards."
+
+endif # ZMK_INPUT_GPIO_DIRECT
+
 if ZMK_INPUT_GPIO_MATRIX
 
 config ZMK_INPUT_MATRIX_POLLING
@@ -39,6 +54,10 @@ config ZMK_INPUT_MATRIX_WAIT_BETWEEN_OUTPUTS
         scenario, set this value to a positive value to configure the number of
         microseconds to wait after reading each column of keys.
 
+endif # ZMK_INPUT_GPIO_MATRIX
+
+if ZMK_INPUT_GPIO_MATRIX || ZMK_INPUT_GPIO_DIRECT
+
 config ZMK_INPUT_DEBOUNCE_PRESS_MS
     int "Debounce time for key press in milliseconds."
     default -1
@@ -46,7 +65,7 @@ config ZMK_INPUT_DEBOUNCE_PRESS_MS
         Global debounce time for key press in milliseconds.
         If this is -1, the debounce time is controlled by the debounce-press-ms
         Devicetree property, which defaults to 5 ms. Otherwise this overrides the
-        debounce time for all input matrix drivers to the chosen value.
+        debounce time for all input GPIO drivers to the chosen value.
 
 config ZMK_INPUT_DEBOUNCE_RELEASE_MS
     int "Debounce time for key release in milliseconds."
@@ -55,6 +74,6 @@ config ZMK_INPUT_DEBOUNCE_RELEASE_MS
         Global debounce time for key release in milliseconds.
         If this is -1, the debounce time is controlled by the debounce-release-ms
         Devicetree property, which defaults to 5 ms. Otherwise this overrides the
-        debounce time for all input matrix drivers to the chosen value.
+        debounce time for all input GPIO drivers to the chosen value.
 
-endif # ZMK_INPUT_GPIO_MATRIX
+endif # ZMK_INPUT_GPIO_MATRIX || ZMK_INPUT_GPIO_DIRECT

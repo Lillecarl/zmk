@@ -1,0 +1,47 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Direct GPIO keyboard input device.
+
+  Reports key state as Zephyr input events:
+    INPUT_EV_ABS / INPUT_ABS_X     = key index (column)
+    INPUT_EV_ABS / INPUT_ABS_Y     = 0 (row)
+    INPUT_EV_KEY / INPUT_BTN_TOUCH = pressed/released (sync)
+
+compatible: "zmk,input-gpio-direct"
+
+include: base.yaml
+
+properties:
+  input-gpios:
+    type: phandle-array
+    required: false
+  input-keys:
+    type: phandles
+    required: false
+    description: List of gpio-key references
+  debounce-period:
+    type: int
+    required: false
+    deprecated: true
+    description: Deprecated. Use debounce-press-ms and debounce-release-ms instead.
+  debounce-press-ms:
+    type: int
+    default: 5
+    description: Debounce time for key press in milliseconds. Use 0 for eager debouncing.
+  debounce-release-ms:
+    type: int
+    default: 5
+    description: Debounce time for key release in milliseconds.
+  debounce-scan-period-ms:
+    type: int
+    default: 1
+    description: Time between reads in milliseconds when any key is pressed.
+  poll-period-ms:
+    type: int
+    default: 10
+    description: Time between reads in milliseconds when no key is pressed and ZMK_INPUT_DIRECT_POLLING is enabled.
+  toggle-mode:
+    type: boolean
+    description: Enable toggle-switch mode.
