@@ -1,5 +1,5 @@
 Dispatching handle_keycode_state_changed
-Setting last_tapped_timestamp to: 11
+Setting last_tapped_timestamp to: 101
 kp_pressed: usage_page 0x07 keycode 0x04 implicit_mods 0x00 explicit_mods 0x00
 Dispatching handle_keycode_state_changed
 kp_released: usage_page 0x07 keycode 0x04 implicit_mods 0x00 explicit_mods 0x00

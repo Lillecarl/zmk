@@ -38,7 +38,7 @@ static void input_mock_work_cb(struct k_work *work) {
 
     data->event_index++;
 
-    size_t base_idx = data->event_index * 4;
+    size_t base_idx = data->event_index * 5;
 
     if (base_idx >= cfg->events_len) {
         if (cfg->exit_after) {
@@ -53,7 +53,11 @@ static void input_mock_work_cb(struct k_work *work) {
                  sync, K_NO_WAIT);
 
     if (sync) {
-        k_work_schedule(&data->work, K_MSEC(cfg->event_period));
+        uint32_t delay = cfg->events[base_idx + 4];
+        if (delay == 0) {
+            delay = cfg->event_period;
+        }
+        k_work_schedule(&data->work, K_MSEC(delay));
     } else {
         k_work_schedule(&data->work, K_NO_WAIT);
     }

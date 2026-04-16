@@ -1,6 +1,6 @@
 #include <dt-bindings/zmk/keys.h>
 #include <behaviors.dtsi>
-#include <dt-bindings/zmk/kscan_mock.h>
+#include <dt-bindings/zmk/input_mock.h>
 
 #define kA 0
 #define kB 1
@@ -43,20 +43,20 @@
 };
 
 #define press_A_and_wait(delay_next) \
-    ZMK_MOCK_PRESS(0,0,delay_next)
+    ZMK_INPUT_MOCK_PRESS(0,0,delay_next)
 #define press_B_and_wait(delay_next) \
-    ZMK_MOCK_PRESS(0,1,delay_next)
+    ZMK_INPUT_MOCK_PRESS(0,1,delay_next)
 #define press_C_and_wait(delay_next) \
-    ZMK_MOCK_PRESS(1,0,delay_next)
+    ZMK_INPUT_MOCK_PRESS(1,0,delay_next)
 #define press_D_and_wait(delay_next) \
-    ZMK_MOCK_PRESS(1,1,delay_next)
+    ZMK_INPUT_MOCK_PRESS(1,1,delay_next)
 
 #define release_A_and_wait(delay_next) \
-    ZMK_MOCK_RELEASE(0,0,delay_next)
+    ZMK_INPUT_MOCK_RELEASE(0,0,delay_next)
 #define release_D_and_wait(delay_next) \
-    ZMK_MOCK_RELEASE(1,1,delay_next)
+    ZMK_INPUT_MOCK_RELEASE(1,1,delay_next)
 
-&kscan {
+&mock_input {
     events = <
         /* Note: This starts at T+50 because the ZMK_MOCK_PRESS seems to launch the first event at T+(first wait duration). So in our case T+50 */
 

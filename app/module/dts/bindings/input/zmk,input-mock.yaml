@@ -13,9 +13,10 @@ properties:
     description: Milliseconds to delay before starting generating the events
   event-period:
     type: int
-    description: Milliseconds between each generated event
+    default: 0
+    description: Default milliseconds between each sync event, used when per-event delay is 0
   events:
     type: array
-    description: List of tuples of (type, code, value, sync)
+    description: List of tuples of (type, code, value, sync, delay_ms)
   exit-after:
     type: boolean

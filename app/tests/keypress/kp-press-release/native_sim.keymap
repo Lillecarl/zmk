@@ -1,8 +1,9 @@
 #include "../behavior_keymap.dtsi"
+#include <dt-bindings/zmk/input_mock.h>
 
-&kscan {
+&mock_input {
     events = <
-        ZMK_MOCK_PRESS(0,0,10)
-        ZMK_MOCK_RELEASE(0,0,10)
+        ZMK_INPUT_MOCK_PRESS(0,0,10)
+        ZMK_INPUT_MOCK_RELEASE(0,0,10)
     >;
 };

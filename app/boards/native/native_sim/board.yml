@@ -5,3 +5,5 @@ board:
       qualifier: native
     - name: zmk_test_mock
       qualifier: native
+    - name: zmk_test_input_mock
+      qualifier: native

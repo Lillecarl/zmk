@@ -1,6 +1,6 @@
 #include <dt-bindings/zmk/keys.h>
 #include <behaviors.dtsi>
-#include <dt-bindings/zmk/kscan_mock.h>
+#include <dt-bindings/zmk/input_mock.h>
 
 /* it is useful to set timeout to a large value when attaching a debugger. */
 #define TIMEOUT (60*60*1000)
@@ -28,12 +28,12 @@
     };
 };
 
-&kscan {
+&mock_input {
     events = <
         /* Combo One */
-        ZMK_MOCK_PRESS(0,0,10)
-        ZMK_MOCK_PRESS(0,1,10)
-        ZMK_MOCK_RELEASE(0,0,10)
-        ZMK_MOCK_RELEASE(0,1,10)
+        ZMK_INPUT_MOCK_PRESS(0,0,10)
+        ZMK_INPUT_MOCK_PRESS(0,1,10)
+        ZMK_INPUT_MOCK_RELEASE(0,0,10)
+        ZMK_INPUT_MOCK_RELEASE(0,1,10)
     >;
 };

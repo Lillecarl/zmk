@@ -1,6 +1,6 @@
 #include <dt-bindings/zmk/keys.h>
 #include <behaviors.dtsi>
-#include <dt-bindings/zmk/kscan_mock.h>
+#include <dt-bindings/zmk/input_mock.h>
 
 /*
  sticky layers should quick-release.
@@ -31,34 +31,34 @@
     };
 };
 
-&kscan {
+&mock_input {
     events = <
         /* press sl 1 */
-        ZMK_MOCK_PRESS(0,0,10)
-        ZMK_MOCK_RELEASE(0,0,10)
+        ZMK_INPUT_MOCK_PRESS(0,0,10)
+        ZMK_INPUT_MOCK_RELEASE(0,0,10)
         /* press sl 2 */
-        ZMK_MOCK_PRESS(0,0,10)
-        ZMK_MOCK_RELEASE(0,0,10)
+        ZMK_INPUT_MOCK_PRESS(0,0,10)
+        ZMK_INPUT_MOCK_RELEASE(0,0,10)
         /* press 1 */
-        ZMK_MOCK_PRESS(0,1,10)
-        ZMK_MOCK_RELEASE(0,1,10)
+        ZMK_INPUT_MOCK_PRESS(0,1,10)
+        ZMK_INPUT_MOCK_RELEASE(0,1,10)
         /* press A */
-        ZMK_MOCK_PRESS(0,1,10)
-        ZMK_MOCK_RELEASE(0,1,10)
+        ZMK_INPUT_MOCK_PRESS(0,1,10)
+        ZMK_INPUT_MOCK_RELEASE(0,1,10)
 
         /* repeat test to check if cleanup is done correctly */
         /* press sl 1 */
-        ZMK_MOCK_PRESS(0,0,10)
-        ZMK_MOCK_RELEASE(0,0,10)
+        ZMK_INPUT_MOCK_PRESS(0,0,10)
+        ZMK_INPUT_MOCK_RELEASE(0,0,10)
         /* press sl 2 */
-        ZMK_MOCK_PRESS(0,0,10)
-        ZMK_MOCK_RELEASE(0,0,10)
+        ZMK_INPUT_MOCK_PRESS(0,0,10)
+        ZMK_INPUT_MOCK_RELEASE(0,0,10)
         /* press 1 */
-        ZMK_MOCK_PRESS(0,1,10)
-        ZMK_MOCK_RELEASE(0,1,10)
+        ZMK_INPUT_MOCK_PRESS(0,1,10)
+        ZMK_INPUT_MOCK_RELEASE(0,1,10)
         /* press A */
-        ZMK_MOCK_PRESS(0,1,10)
-        ZMK_MOCK_RELEASE(0,1,10)
+        ZMK_INPUT_MOCK_PRESS(0,1,10)
+        ZMK_INPUT_MOCK_RELEASE(0,1,10)
 
     >;
 };
