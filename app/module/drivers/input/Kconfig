@@ -21,6 +21,12 @@ config ZMK_INPUT_GPIO_DIRECT
     select GPIO
     select ZMK_DEBOUNCE
 
+config ZMK_INPUT_COMPOSITE
+    bool "Composite input driver"
+    default y
+    depends on DT_HAS_ZMK_INPUT_COMPOSITE_ENABLED
+    select INPUT
+
 if ZMK_INPUT_GPIO_DIRECT
 
 config ZMK_INPUT_DIRECT_POLLING

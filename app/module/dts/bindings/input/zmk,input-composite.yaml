@@ -1,0 +1,34 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Compose multiple input devices (each emitting ABS_X/ABS_Y/BTN_TOUCH key
+  events) into a single logical input device with per-child row/column
+  offsets.
+
+  The composite device re-emits key events with offsets applied. Point
+  chosen { zmk,matrix-input = ...; } (or a physical layout's `input`
+  property) at the composite node.
+
+compatible: "zmk,input-composite"
+
+include: base.yaml
+
+child-binding:
+  description: A child input device with row/column offsets.
+
+  properties:
+    input:
+      type: phandle
+      required: true
+      description: The input device whose events are re-emitted with offsets.
+    row-offset:
+      type: int
+      default: 0
+    col-offset:
+      type: int
+      default: 0
+    column-offset:
+      type: int
+      default: 0
+      deprecated: true
