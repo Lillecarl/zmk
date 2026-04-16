@@ -1,0 +1,32 @@
+# Copyright (c) 2023-2026, The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Input sideband behavior runner. Listens to an input device reporting
+  (ABS_X=col, ABS_Y=row, BTN_TOUCH=pressed) and triggers the matching
+  behavior binding on press/release. Only basic system behaviors should
+  be used since no keymap processing occurs (avoid tap-holds, sticky
+  keys, etc. as sideband behaviors).
+
+compatible: "zmk,input-sideband-behaviors"
+
+properties:
+  input:
+    type: phandle
+    required: true
+    description: |
+      The input device whose events are matched against the child entries.
+
+child-binding:
+  description: "A sideband behavior tied to a row/column pair."
+
+  properties:
+    row:
+      type: int
+      default: 0
+    column:
+      type: int
+      required: true
+    bindings:
+      type: phandle-array
+      required: true

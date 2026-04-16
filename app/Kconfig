@@ -533,6 +533,22 @@ config ZMK_KSCAN_SIDEBAND_BEHAVIORS_INIT_PRIORITY
 
 endif # ZMK_KSCAN_SIDEBAND_BEHAVIORS
 
+config ZMK_INPUT_SIDEBAND_BEHAVIORS
+    bool
+    default y
+    depends on DT_HAS_ZMK_INPUT_SIDEBAND_BEHAVIORS_ENABLED
+    select INPUT
+
+if ZMK_INPUT_SIDEBAND_BEHAVIORS
+
+config ZMK_INPUT_SIDEBAND_BEHAVIORS_INIT_PRIORITY
+    int "Input sideband behaviors driver init priority"
+    # The default input-driver init priority is CONFIG_INPUT_INIT_PRIORITY
+    # (90); initialize after so the source input device is ready.
+    default 95
+
+endif # ZMK_INPUT_SIDEBAND_BEHAVIORS
+
 menu "Logging"
 
 config ZMK_LOGGING_MINIMAL
