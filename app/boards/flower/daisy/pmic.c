@@ -224,7 +224,6 @@ static int daisy_leds_update_listener(const zmk_event_t *eh)
 	if (usb_changed) {
 		printk("zoid: usb_conn_state_changed\n");
 		printk("zoid: zmk_usb_is_powered: %d\n", zmk_usb_is_powered());
-		printk("zoid: zmk_usb_get_status: %d\n", zmk_usb_get_status());
 		printk("zoid: zmk_usb_get_conn_state: %d\n", zmk_usb_get_conn_state());
 		update_power_led();
 	}
@@ -284,9 +283,9 @@ int led_init(void)
 			protocol_switch_usb ? "USB" : "BLE",
 			protocol_switch_usb);
 	if (protocol_switch_usb)
-		zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
+		zmk_endpoint_set_preferred_transport(ZMK_TRANSPORT_USB);
 	else
-		zmk_endpoints_select_transport(ZMK_TRANSPORT_BLE);
+		zmk_endpoint_set_preferred_transport(ZMK_TRANSPORT_BLE);
 
 	/* Initialize the status LEDs */
 	update_power_led();
@@ -299,14 +298,14 @@ SYS_INIT(led_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
 static int on_led_binding_pressed(struct zmk_behavior_binding *binding, struct zmk_behavior_binding_event event)
 {
 	protocol_switch_usb = binding->param1;
-	printk("daisy: Changed mode switch behavior %d. Current transport: %d\n", protocol_switch_usb, zmk_endpoints_selected().transport);
+	printk("daisy: Changed mode switch behavior %d. Current transport: %d\n", protocol_switch_usb, zmk_endpoint_get_selected().transport);
 	protocol_switch_usb = gpio_pin_get_raw(protocol_switch.port, protocol_switch.pin);
 	printk("daisy: gpio RAW: %s (%d)\n", protocol_switch_usb ? "USB" : "BLE", protocol_switch_usb);
 
 	if (protocol_switch_usb)
-		zmk_endpoints_select_transport(ZMK_TRANSPORT_USB);
+		zmk_endpoint_set_preferred_transport(ZMK_TRANSPORT_USB);
 	else
-		zmk_endpoints_select_transport(ZMK_TRANSPORT_BLE);
+		zmk_endpoint_set_preferred_transport(ZMK_TRANSPORT_BLE);
 
 	/* If we booted in BLE mode without any device connected, the
 	 * transport is USB. So switching the switch to USB does not
