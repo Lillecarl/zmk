@@ -90,8 +90,9 @@ BUILD_ASSERT(
                         ())};                                                                      \
     COND_CODE_1(                                                                                   \
         UTIL_AND(MATRIX_INPUT_SUPPORT, DT_INST_PROP_LEN(n, input)),                                \
-        (INPUT_CALLBACK_DEFINE(INPUT_FOR_INST(n), zmk_physical_layout_input_event_cb,              \
-                               (void *)&(_CONCAT(_zmk_physical_layout_, DT_DRV_INST(n))));),       \
+        (INPUT_CALLBACK_DEFINE_NAMED(INPUT_FOR_INST(n), zmk_physical_layout_input_event_cb,        \
+                                     (void *)&(_CONCAT(_zmk_physical_layout_, DT_DRV_INST(n))),    \
+                                     zmk_physical_layout_input_cb_##n);),                          \
         ())
 
 DT_INST_FOREACH_STATUS_OKAY(ZMK_LAYOUT_INST)
