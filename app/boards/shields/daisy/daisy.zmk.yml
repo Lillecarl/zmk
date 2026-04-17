@@ -1,0 +1,9 @@
+file_format: "1"
+id: daisy
+name: Daisy
+type: shield
+url: https://github.com/zmkfirmware/daisy
+requires: []
+features:
+  - keys
+  - studio

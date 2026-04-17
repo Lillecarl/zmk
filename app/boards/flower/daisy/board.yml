@@ -1,0 +1,11 @@
+board:
+  name: daisy
+  vendor: flower
+  socs:
+    - name: nrf52840
+  revision:
+    format: major.minor.patch
+    default: 0.1.0
+    revisions:
+      # POC
+      - name: 0.1.0

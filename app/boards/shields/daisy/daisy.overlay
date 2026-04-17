@@ -1,0 +1,40 @@
+/*
+ * Copyright (c) 2022 The ZMK Contributors
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#include "daisy.dtsi"
+
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/bt.h>
+#include <dt-bindings/zmk/outputs.h>
+
+/ {
+    chosen {
+        zmk,physical-layout = &matrix_physical_layout;
+    };
+
+    macros {
+        ZMK_MACRO(ble0,
+            wait-ms = <1>;
+            tap-ms = <1>;
+            bindings = <&out OUT_BLE &bt BT_SEL 0>;
+        )
+        ZMK_MACRO(ble1,
+            wait-ms = <1>;
+            tap-ms = <1>;
+            bindings = <&out OUT_BLE &bt BT_SEL 1>;
+        )
+        ZMK_MACRO(ble2,
+            wait-ms = <1>;
+            tap-ms = <1>;
+            bindings = <&out OUT_BLE &bt BT_SEL 2>;
+        )
+        ZMK_MACRO(ble_pair,
+            wait-ms = <1>;
+            tap-ms = <1>;
+            bindings = <&out OUT_BLE &bt BT_CLR>;
+        )
+    };
+};

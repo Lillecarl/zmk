@@ -1,0 +1,7 @@
+zephyr_library_include_directories(${CMAKE_SOURCE_DIR}/include)
+if(CONFIG_BOARD_DAISY)
+  zephyr_library_sources(layout.c)
+endif()
+if(CONFIG_ZMK_HID_INDICATORS)
+  zephyr_library_sources(capslock.c)
+endif()

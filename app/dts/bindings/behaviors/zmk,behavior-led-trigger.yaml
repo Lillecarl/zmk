@@ -1,0 +1,5 @@
+description: Custom LED Trigger Behavior
+
+compatible: "zmk,behavior-led-trigger"
+
+include: one_param.yaml

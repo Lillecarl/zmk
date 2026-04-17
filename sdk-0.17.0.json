@@ -1,0 +1,15 @@
+{
+  "files": {
+    "hosttools_linux-aarch64.tar.xz": "53cdc0072eacfef2a09714daaf4a2f4250ef520b9ffc0d43ab4507dddbcd310d",
+    "hosttools_linux-x86_64.tar.xz": "0c64b2c5eac4da138588aa5fe80b0bab037725f0752b22cb8853fc026c737047",
+    "toolchain_linux-aarch64_arm-zephyr-eabi.tar.xz": "b88e22918c0f9e7d33a329f01000d47a2bd00c4dfb80cc83c5308095f0eaeebd",
+    "toolchain_linux-x86_64_arm-zephyr-eabi.tar.xz": "c3992a788a0896ecc87f7fb3a3be3f234ec0509220bd4e9dbd99b22edd55e97f",
+    "toolchain_macos-aarch64_arm-zephyr-eabi.tar.xz": "1168c50a193a7d5b8ee583dad70bd33bbe43903551096f2e4854cd527c415d5c",
+    "toolchain_macos-x86_64_arm-zephyr-eabi.tar.xz": "68f58fe77f94198f440b4c05fbb8503360f45712d5f5380ba39dfaea0736e7cb",
+    "zephyr-sdk-0.17.0_linux-aarch64_minimal.tar.xz": "889f10c68a179f5ff2e4ea84749202c117bb522af705d5a888ebe76373acac5a",
+    "zephyr-sdk-0.17.0_linux-x86_64_minimal.tar.xz": "0514d2c684dfb5f6327374bfed0b3dcf727ff1500195d26b3730f98252fed095",
+    "zephyr-sdk-0.17.0_macos-aarch64_minimal.tar.xz": "d6dd38ac08d1e3e8d4653a7f03f6f52a704fc9317d8eed6e950e107829f929c4",
+    "zephyr-sdk-0.17.0_macos-x86_64_minimal.tar.xz": "c3b7705afd3721fcd545f7011eb5662aa099ff5f8efeeba0894700798c4b1f35"
+  },
+  "version": "0.17.0"
+}

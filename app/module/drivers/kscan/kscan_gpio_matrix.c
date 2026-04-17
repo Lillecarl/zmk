@@ -223,7 +223,8 @@ static int kscan_matrix_read(const struct device *dev) {
     for (int i = 0; i < config->outputs.len; i++) {
         const struct kscan_gpio *out_gpio = &config->outputs.gpios[i];
 
-        int err = gpio_pin_set_dt(&out_gpio->spec, 1);
+        //int err = gpio_pin_set_dt(&out_gpio->spec, 1);
+        int err = gpio_pin_configure_dt(&out_gpio->spec, GPIO_OUTPUT_ACTIVE);
         if (err) {
             LOG_ERR("Failed to set output %i active: %i", out_gpio->index, err);
             return err;
@@ -248,7 +249,8 @@ static int kscan_matrix_read(const struct device *dev) {
                                 &config->debounce_config);
         }
 
-        err = gpio_pin_set_dt(&out_gpio->spec, 0);
+        // err = gpio_pin_set_dt(&out_gpio->spec, 0);
+        err = gpio_pin_configure_dt(&out_gpio->spec, GPIO_DISCONNECTED);
         if (err) {
             LOG_ERR("Failed to set output %i inactive: %i", out_gpio->index, err);
             return err;

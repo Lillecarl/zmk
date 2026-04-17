@@ -1,0 +1,10 @@
+&i2c0 {
+    status = "okay";
+
+    touchpad: touchpad@2c {
+        compatible = "zmk,hid-touchpad";
+        status = "disabled"; /* TODO: needs PCT3854 report descriptor blob and report IDs */
+        reg = <0x2c>;
+        dr-gpios = <&gpio1 11 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    };
+};

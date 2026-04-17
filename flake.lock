@@ -1,0 +1,260 @@
+{
+  "nodes": {
+    "nix-github-actions": {
+      "inputs": {
+        "nixpkgs": [
+          "west2nix",
+          "zephyr-nix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1737420293,
+        "narHash": "sha256-F1G5ifvqTpJq7fdkT34e/Jy9VCyzd5XfJ9TO8fHhJWE=",
+        "owner": "nix-community",
+        "repo": "nix-github-actions",
+        "rev": "f4158fa080ef4503c8f4c820967d946c2af31ec9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "nix-github-actions",
+        "type": "github"
+      }
+    },
+    "nix-github-actions_2": {
+      "inputs": {
+        "nixpkgs": [
+          "zephyr-nix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1737420293,
+        "narHash": "sha256-F1G5ifvqTpJq7fdkT34e/Jy9VCyzd5XfJ9TO8fHhJWE=",
+        "owner": "nix-community",
+        "repo": "nix-github-actions",
+        "rev": "f4158fa080ef4503c8f4c820967d946c2af31ec9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "nix-github-actions",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1774386573,
+        "narHash": "sha256-4hAV26quOxdC6iyG7kYaZcM3VOskcPUrdCQd/nx8obc=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "46db2e09e1d3f113a13c0d7b81e2f221c63b8ce9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "pyproject-nix": {
+      "inputs": {
+        "nixpkgs": [
+          "west2nix",
+          "zephyr-nix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1753773975,
+        "narHash": "sha256-r0NuyhyLUeLe/kSr+u2VFGjHFdccBJckZyFt74MYL5A=",
+        "owner": "nix-community",
+        "repo": "pyproject.nix",
+        "rev": "62cc4495b3b2d2a259db321a06584378e93843a6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "pyproject.nix",
+        "type": "github"
+      }
+    },
+    "pyproject-nix_2": {
+      "inputs": {
+        "nixpkgs": [
+          "zephyr-nix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1773553880,
+        "narHash": "sha256-wfvYZMO2NOGBw/DiYX50FFvr2pIS/hjJ9Bx0FD3LH5E=",
+        "owner": "pyproject-nix",
+        "repo": "pyproject.nix",
+        "rev": "3799d59a6886bed706eed9d209d7fc9db8ae9040",
+        "type": "github"
+      },
+      "original": {
+        "owner": "pyproject-nix",
+        "repo": "pyproject.nix",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs",
+        "west2nix": "west2nix",
+        "zephyr": "zephyr_2",
+        "zephyr-hid-touchpad-module": "zephyr-hid-touchpad-module",
+        "zephyr-nix": "zephyr-nix_2"
+      }
+    },
+    "uv-python": {
+      "inputs": {
+        "nixpkgs": [
+          "zephyr-nix",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1773542919,
+        "narHash": "sha256-SOg353SBOisynxIfBjZucT8lXwERH4GJkkaACkwSj/A=",
+        "owner": "pyproject-nix",
+        "repo": "uv-python.nix",
+        "rev": "2d87c20a2cbf2bb96d1edd08127ed6af9968de7b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "pyproject-nix",
+        "repo": "uv-python.nix",
+        "type": "github"
+      }
+    },
+    "west2nix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "zephyr-nix": "zephyr-nix"
+      },
+      "locked": {
+        "lastModified": 1753935156,
+        "narHash": "sha256-D6iH0d67AmlB7k3QIjUvNo7NafzWy03HOHV5o4w251s=",
+        "owner": "adisbladis",
+        "repo": "west2nix",
+        "rev": "f84670d66f881d9340b7d7626fbfe499438c134b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "adisbladis",
+        "repo": "west2nix",
+        "type": "github"
+      }
+    },
+    "zephyr": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1752880629,
+        "narHash": "sha256-N5VgJMYJZCgTe3Qj59KVynxD0Gs5+qawXkH2geWTEE0=",
+        "owner": "zephyrproject-rtos",
+        "repo": "zephyr",
+        "rev": "413b789deb391d3a37d06b463288a5fe765ee57e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "zephyrproject-rtos",
+        "ref": "v4.2.0",
+        "repo": "zephyr",
+        "type": "github"
+      }
+    },
+    "zephyr-hid-touchpad-module": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1772214726,
+        "narHash": "sha256-PtLiqUDertguf4skbPRtzDw3k4/BCWDhWGSUGoLTdRg=",
+        "ref": "passthrough",
+        "rev": "ca12a6f722c6b64b1fcf210ea61c6ff91a31431a",
+        "revCount": 10,
+        "type": "git",
+        "url": "ssh://git@github.com/FrameworkComputer/zephyr-hid-touchpad-module"
+      },
+      "original": {
+        "ref": "passthrough",
+        "type": "git",
+        "url": "ssh://git@github.com/FrameworkComputer/zephyr-hid-touchpad-module"
+      }
+    },
+    "zephyr-nix": {
+      "inputs": {
+        "nix-github-actions": "nix-github-actions",
+        "nixpkgs": [
+          "west2nix",
+          "nixpkgs"
+        ],
+        "pyproject-nix": "pyproject-nix",
+        "zephyr": "zephyr"
+      },
+      "locked": {
+        "lastModified": 1753934984,
+        "narHash": "sha256-1+5FO3Yg1bVz07mOr5XofwX1mT74nJc1fA/IEmqLBz0=",
+        "owner": "adisbladis",
+        "repo": "zephyr-nix",
+        "rev": "d1d5f404a6109766ff41190d42e896d14f6eed1e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "adisbladis",
+        "repo": "zephyr-nix",
+        "type": "github"
+      }
+    },
+    "zephyr-nix_2": {
+      "inputs": {
+        "nix-github-actions": "nix-github-actions_2",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "pyproject-nix": "pyproject-nix_2",
+        "uv-python": "uv-python",
+        "zephyr": [
+          "zephyr"
+        ]
+      },
+      "locked": {
+        "lastModified": 1774612471,
+        "narHash": "sha256-m6OQlqIqf/iWgFvFLh3Qww/zkjQL6r2amiFa9nBqUsY=",
+        "owner": "nix-community",
+        "repo": "zephyr-nix",
+        "rev": "6af7bc7fe6d44597fed91188b7ba819feb41abeb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "zephyr-nix",
+        "type": "github"
+      }
+    },
+    "zephyr_2": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1765665288,
+        "narHash": "sha256-2vOfu7h9yLHz9JpSkjJ2ZxvfFlWtbn3tvGqczW9raig=",
+        "ref": "daisy-zephyr4.1",
+        "rev": "7a890bde1746b26d587dff82ae6cdda18a04c260",
+        "revCount": 111179,
+        "type": "git",
+        "url": "ssh://git@github.com/FrameworkComputer/zephyr-private"
+      },
+      "original": {
+        "ref": "daisy-zephyr4.1",
+        "type": "git",
+        "url": "ssh://git@github.com/FrameworkComputer/zephyr-private"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
