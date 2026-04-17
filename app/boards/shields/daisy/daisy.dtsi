@@ -100,14 +100,6 @@
         , <&gpio1  9 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI7 TRACEDATA[3]
         ;
     };
-
-    leds {
-        compatible = "gpio-leds";
-        /* Capslock LED on keyboard membrane. Has pulldown on main PCB */
-        caps_led: led_3 {
-            gpios = <&gpio1 15 GPIO_ACTIVE_HIGH>;
-        };
-    };
 };
 
 &matrix_physical_layout {

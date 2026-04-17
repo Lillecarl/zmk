@@ -1,3 +1,13 @@
+/ {
+    leds {
+        compatible = "gpio-leds";
+        /* Capslock LED on keyboard membrane. Has pulldown on main PCB */
+        caps_led: led_3 {
+            gpios = <&gpio1 15 GPIO_ACTIVE_HIGH>;
+        };
+    };
+};
+
 &i2c1 {
     status = "okay";
 
