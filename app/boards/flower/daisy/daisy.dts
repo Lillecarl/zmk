@@ -7,7 +7,7 @@
 /dts-v1/;
 #include <nordic/nrf52840_qiaa.dtsi>
 #include "daisy-pinctrl.dtsi"
-#include <dt-bindings/regulator/npm1300.h>
+#include <dt-bindings/regulator/npm13xx.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 
 / {
@@ -100,7 +100,7 @@
 
 	hid_dev_0: hid_dev_0 {
 		compatible = "zephyr,hid-device";
-		interface-name = "HID0";
+		label = "HID0";
 		protocol-code = "keyboard";
 		in-report-size = <64>;
 		in-polling-period-us = <1000>;

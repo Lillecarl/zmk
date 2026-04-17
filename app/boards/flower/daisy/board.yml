@@ -1,5 +1,6 @@
 board:
   name: daisy
+  full_name: daisy
   vendor: flower
   socs:
     - name: nrf52840
