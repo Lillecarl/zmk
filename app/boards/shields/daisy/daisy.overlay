@@ -15,6 +15,18 @@
         zmk,physical-layout = &matrix_physical_layout;
     };
 
+    /* Second USB HID interface for the touchpad passthrough. Only
+     * consumed when CONFIG_USBD_HID_SUPPORT is enabled (new USB stack);
+     * ignored under the legacy stack, which routes the passthrough
+     * through its own CONFIG_USB_HID_DEVICE_COUNT-based HID_1 instance. */
+    tp_hid: tp_hid {
+        compatible = "zephyr,hid-device";
+        label = "HID1";
+        protocol-code = "none";
+        in-report-size = <64>;
+        in-polling-period-us = <1000>;
+    };
+
     macros {
         ZMK_MACRO(ble0,
             wait-ms = <1>;
