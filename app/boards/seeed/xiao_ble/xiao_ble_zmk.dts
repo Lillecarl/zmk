@@ -13,6 +13,7 @@ sd_partition: &reserved_partition_0 { };
 / {
     chosen {
         zmk,battery = &vbatt;
+        zmk,keyboard-hid = &hid_dev_0;
     };
 
     hid_dev_0: hid_dev_0 {

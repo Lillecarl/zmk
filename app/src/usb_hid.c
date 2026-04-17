@@ -223,10 +223,14 @@ int zmk_usb_hid_send_mouse_report() {
 }
 #endif // IS_ENABLED(CONFIG_ZMK_POINTING)
 
+#if !DT_HAS_CHOSEN(zmk_keyboard_hid)
+#error "CONFIG_ZMK_USB requires chosen zmk,keyboard-hid to point at a zephyr,hid-device node"
+#endif
+
 static int zmk_usb_hid_init(void) {
     int err;
 
-    hid_dev = DEVICE_DT_GET_ONE(zephyr_hid_device);
+    hid_dev = DEVICE_DT_GET(DT_CHOSEN(zmk_keyboard_hid));
     if (!device_is_ready(hid_dev)) {
         LOG_ERR("HID device is not ready");
         return -ENODEV;

@@ -27,6 +27,7 @@
 		/* UF2 Adafruit Bootloader */
 		zephyr,code-partition = &code_partition;
 		zmk,battery = &npm1300_charger;
+		zmk,keyboard-hid = &hid_dev_0;
 	};
 
 	/**
