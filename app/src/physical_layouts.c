@@ -8,7 +8,9 @@
 #include <zephyr/device.h>
 #include <zephyr/pm/device.h>
 #include <zephyr/pm/device_runtime.h>
+#if IS_ENABLED(CONFIG_ZMK_KSCAN)
 #include <zephyr/drivers/kscan.h>
+#endif
 #include <zephyr/input/input.h>
 
 #if IS_ENABLED(CONFIG_SETTINGS)
@@ -264,6 +266,7 @@ static void zmk_physical_layout_input_event_cb(struct input_event *evt, void *us
 
 #endif
 
+#if IS_ENABLED(CONFIG_ZMK_KSCAN)
 static void zmk_physical_layout_kscan_callback(const struct device *dev, uint32_t row,
                                                uint32_t column, bool pressed) {
     if (dev != active->kscan) {
@@ -278,6 +281,7 @@ static void zmk_physical_layout_kscan_callback(const struct device *dev, uint32_
     k_msgq_put(&physical_layouts_kscan_msgq, &ev, K_NO_WAIT);
     k_work_submit(&msg_processor.work);
 }
+#endif
 
 static void zmk_physical_layouts_kscan_process_msgq(struct k_work *item) {
     struct zmk_kscan_event ev;
@@ -343,7 +347,9 @@ int zmk_physical_layouts_select_layout(const struct zmk_physical_layout *dest_la
 
     if (active) {
         if (active->kscan) {
+#if IS_ENABLED(CONFIG_ZMK_KSCAN)
             kscan_disable_callback(active->kscan);
+#endif
 #if IS_ENABLED(CONFIG_PM_DEVICE_RUNTIME)
             pm_device_runtime_put(active->kscan);
 #elif IS_ENABLED(CONFIG_PM_DEVICE)
@@ -373,8 +379,10 @@ int zmk_physical_layouts_select_layout(const struct zmk_physical_layout *dest_la
 #elif IS_ENABLED(CONFIG_PM_DEVICE)
         pm_device_action_run(active->kscan, PM_DEVICE_ACTION_RESUME);
 #endif
+#if IS_ENABLED(CONFIG_ZMK_KSCAN)
         kscan_config(active->kscan, zmk_physical_layout_kscan_callback);
         kscan_enable_callback(active->kscan);
+#endif
     }
 
     return 0;
