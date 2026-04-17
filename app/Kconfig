@@ -505,18 +505,22 @@ config ZMK_PHYSICAL_LAYOUT_KEY_ROTATION
     bool "Support rotation of keys in physical layouts"
     default y
 
+DT_CHOSEN_ZMK_KSCAN := zmk,kscan
+
 menuconfig ZMK_KSCAN
     bool "ZMK KScan Integration"
-    default y
+    default y if DT_HAS_ZMK_KSCAN_GPIO_MATRIX_ENABLED
+    default y if DT_HAS_ZMK_KSCAN_GPIO_DIRECT_ENABLED
+    default y if DT_HAS_ZMK_KSCAN_GPIO_CHARLIEPLEX_ENABLED
+    default y if DT_HAS_ZMK_KSCAN_GPIO_DEMUX_ENABLED
+    default y if DT_HAS_ZMK_KSCAN_COMPOSITE_ENABLED
+    default y if DT_HAS_ZMK_KSCAN_MOCK_ENABLED
+    default y if $(dt_chosen_enabled,$(DT_CHOSEN_ZMK_KSCAN))
     select KSCAN
 
-if ZMK_KSCAN
-
 config ZMK_KSCAN_EVENT_QUEUE_SIZE
-    int "Size of the event queue for KSCAN events to buffer events"
+    int "Size of the event queue for KSCAN/input events to buffer events"
     default 4
-
-endif # ZMK_KSCAN
 
 config ZMK_KSCAN_SIDEBAND_BEHAVIORS
     bool
