@@ -3,7 +3,7 @@ description: |
 
 compatible: "zmk,kscan-composite"
 
-include: kscan.yaml
+include: base.yaml
 
 properties:
   label:

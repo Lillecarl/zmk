@@ -5,7 +5,7 @@ description: Direct GPIO keyboard KSCAN controller
 
 compatible: "zmk,kscan-gpio-direct"
 
-include: kscan.yaml
+include: base.yaml
 
 properties:
   input-gpios:

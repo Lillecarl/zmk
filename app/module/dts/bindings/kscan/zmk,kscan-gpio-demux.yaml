@@ -5,7 +5,7 @@ description: GPIO keyboard demux controller
 
 compatible: "zmk,kscan-gpio-demux"
 
-include: kscan.yaml
+include: base.yaml
 
 properties:
   input-gpios:

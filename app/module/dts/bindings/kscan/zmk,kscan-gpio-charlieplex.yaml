@@ -5,7 +5,7 @@ description: GPIO keyboard charlieplex matrix controller
 
 compatible: "zmk,kscan-gpio-charlieplex"
 
-include: kscan.yaml
+include: base.yaml
 
 properties:
   gpios:
