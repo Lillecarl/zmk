@@ -27,24 +27,22 @@
         >;
     };
 
-    kscan0: kscan_composite {
-        compatible = "zmk,kscan-composite";
-        rows = <9>;
-        columns = <18>;
+    composite_input: input_composite {
+        compatible = "zmk,input-composite";
 
         direct {
-            kscan = <&button_switches_kscan>;
-	    // Shift it after the keyboard scan
+            input = <&buttons_input>;
+            // Shift buttons after the keyboard scan rows.
             row-offset = <8>;
         };
 
         matrix {
-            kscan = <&kscan2>;
+            input = <&matrix_input>;
         };
     };
 
-    button_switches_kscan: kscan_direct {
-        compatible = "zmk,kscan-gpio-direct";
+    buttons_input: input_direct {
+        compatible = "zmk,input-gpio-direct";
         wakeup-source;
         input-gpios
             // Has external pullup on PCB
@@ -54,14 +52,12 @@
             ;
     };
 
-    kscan2: kscan_deghost {
-        compatible = "zmk,kscan-deghost";
-        kscan = <&kscan1>;
-        transform = <&matrix_transform>;
-    };
+    // TODO: no input-deghost driver yet; the kscan-deghost wrapper
+    // was dropped when migrating off the kscan subsystem. Reintroduce
+    // once a zmk,input-deghost driver lands.
 
-    kscan1: kscan_matrix {
-        compatible = "zmk,kscan-gpio-matrix";
+    matrix_input: input_matrix {
+        compatible = "zmk,input-gpio-matrix";
         wakeup-source;
 
         diode-direction = "col2row";
@@ -115,6 +111,6 @@
 };
 
 &matrix_physical_layout {
-    kscan = <&kscan0>;
+    input = <&composite_input>;
     transform = <&matrix_transform>;
 };
