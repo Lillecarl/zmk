@@ -7,10 +7,10 @@ manifest:
     - name: FrameworkComputer
       url-base: git@github.com:FrameworkComputer
   projects:
-    - name: zephyr
+    - name: zephyr-private
       path: zephyr
-      remote: zephyrproject-rtos
-      revision: b1348f3f50a5c4c92d90f4d284df32c2b9bfa9d3
+      remote: FrameworkComputer
+      revision: c7e1c7429b1ba1b62e5a8b37f91a44b43ccec3a9
       clone-depth: 1
       import:
         name-blocklist:
