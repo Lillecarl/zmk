@@ -65,7 +65,7 @@
             compatible = "zmk,behavior-led-trigger";
             #binding-cells = <1>; /* Accepts 1 argument (0 or 1) */
         };
-        pairing_button: pairing_button {
+        pairing_ht: pairing_ht {
             compatible = "zmk,behavior-hold-tap";
             #binding-cells = <2>;
             flavor = "hold-preferred";
@@ -80,7 +80,7 @@
         default_layer {
             display-name = "Default Layer";
             bindings = <
-                &pairing_button 0 0 &usb_bt_sw
+                &pairing_ht 0 0 &usb_bt_sw
                 // ---------------------------------------------------------------------------------------------------------
                 // | ESC  |Mute |Prev |Next  |Prev  |Play  | Next |BrDown |BrUp   |Displ |Airplne|Print  | Media |  DEL    |
                 // |  ` |  1  |  2  |  3   |  4   |  5   |  6   |  7    |  8    |  9   |   0   |  -    |  =    | BACKSPC   |
@@ -124,7 +124,7 @@
         fnlock_layer {
             display-name = "FN Lock Layer";
             bindings = <
-                &pairing_button 0 0 &usb_bt_sw
+                &pairing_ht 0 0 &usb_bt_sw
                 // ---------------------------------------------------------------------------------------------------------
                 // | FNLK |  F1 |  F2 |  F3  |  F4  |  F5  |  F6  |  F7   |  F8   |  F9  |  F10  |  F11  |  F12  |  DEL    |
                 // |    |     |     |      |      |      |      |       |       |      |       |       |       |           |
