@@ -13,9 +13,9 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 // SETTINGS_PARTITION must match settings_nvs.c
 #if DT_HAS_CHOSEN(zephyr_settings_partition)
-#define SETTINGS_PARTITION DT_FIXED_PARTITION_ID(DT_CHOSEN(zephyr_settings_partition))
+#define SETTINGS_PARTITION DT_PARTITION_ID(DT_CHOSEN(zephyr_settings_partition))
 #else
-#define SETTINGS_PARTITION FIXED_PARTITION_ID(storage_partition)
+#define SETTINGS_PARTITION PARTITION_ID(storage_partition)
 #endif
 
 int zmk_settings_erase(void) {
