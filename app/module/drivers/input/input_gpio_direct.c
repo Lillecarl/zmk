@@ -264,19 +264,6 @@ static int input_direct_enable(const struct device *dev) {
     return input_direct_read(dev);
 }
 
-static int input_direct_disable(const struct device *dev) {
-    struct input_direct_data *data = dev->data;
-
-    k_work_cancel_delayable(&data->work);
-
-#if USE_INTERRUPTS
-    return input_direct_interrupt_disable(dev);
-#else
-    ARG_UNUSED(data);
-    return 0;
-#endif
-}
-
 static int input_direct_init_input_inst(const struct device *dev,
                                         const struct input_direct_gpio *gpio, bool toggle_mode) {
     if (!device_is_ready(gpio->spec.port)) {
@@ -372,6 +359,19 @@ static int input_direct_init(const struct device *dev) {
 }
 
 #if IS_ENABLED(CONFIG_PM_DEVICE)
+
+static int input_direct_disable(const struct device *dev) {
+    struct input_direct_data *data = dev->data;
+
+    k_work_cancel_delayable(&data->work);
+
+#if USE_INTERRUPTS
+    return input_direct_interrupt_disable(dev);
+#else
+    ARG_UNUSED(data);
+    return 0;
+#endif
+}
 
 static int input_direct_pm_action(const struct device *dev, enum pm_device_action action) {
     switch (action) {
