@@ -7,10 +7,10 @@ manifest:
     - name: FrameworkComputer
       url-base: git@github.com:FrameworkComputer
   projects:
-    - name: zephyr-private
+    - name: zephyr
       path: zephyr
-      remote: FrameworkComputer
-      revision: daisy-zephyr4.1
+      remote: zephyrproject-rtos
+      revision: b1348f3f50a5c4c92d90f4d284df32c2b9bfa9d3
       clone-depth: 1
       import:
         name-blocklist:
@@ -46,7 +46,7 @@ manifest:
       path: modules/msgs/zmk-studio-messages
       remote: zmkfirmware
     - name: zephyr-hid-touchpad-module
-      revision: cb95adc4cb47cf06c2c794e70630633e532659b3
+      revision: ca12a6f722c6b64b1fcf210ea61c6ff91a31431a
       remote: FrameworkComputer
   group-filter: [+optional]
   self:
