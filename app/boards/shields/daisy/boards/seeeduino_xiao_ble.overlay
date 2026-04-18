@@ -1,3 +1,17 @@
+/ {
+    chosen {
+        zmk,keyboard-hid = &hid_dev_0;
+    };
+
+    hid_dev_0: hid_dev_0 {
+        compatible = "zephyr,hid-device";
+        label = "HID0";
+        protocol-code = "keyboard";
+        in-report-size = <64>;
+        in-polling-period-us = <1000>;
+    };
+};
+
 &i2c0 {
     status = "okay";
 
@@ -7,4 +21,10 @@
         reg = <0x2c>;
         dr-gpios = <&gpio1 11 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
     };
+};
+
+/* Touchpad is disabled above, so disable its companion HID interface too —
+ * otherwise the new USBD stack tries to init it with no registered ops. */
+&tp_hid {
+    status = "disabled";
 };

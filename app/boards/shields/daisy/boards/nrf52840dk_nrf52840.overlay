@@ -4,6 +4,18 @@
 };
 
 / {
+    chosen {
+        zmk,keyboard-hid = &hid_dev_0;
+    };
+
+    hid_dev_0: hid_dev_0 {
+        compatible = "zephyr,hid-device";
+        label = "HID0";
+        protocol-code = "keyboard";
+        in-report-size = <64>;
+        in-polling-period-us = <1000>;
+    };
+
     behaviors {
         hw_soft_off: hw_soft_off {
             compatible = "zmk,behavior-soft-off";

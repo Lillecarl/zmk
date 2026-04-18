@@ -1,24 +1,36 @@
+/ {
+    chosen {
+        zmk,keyboard-hid = &hid_dev_0;
+    };
+
+    hid_dev_0: hid_dev_0 {
+        compatible = "zephyr,hid-device";
+        label = "HID0";
+        protocol-code = "keyboard";
+        in-report-size = <64>;
+        in-polling-period-us = <1000>;
+    };
+};
+
 &i2c0 {
     status = "okay";
     pinctrl-0 = <&i2c0_default>;
     pinctrl-1 = <&i2c0_sleep>;
     pinctrl-names = "default", "sleep";
 
+    /* Legacy PCT3854 inline config predates the current zmk,hid-touchpad
+     * binding (which requires report-descriptor et al). Disabled for now;
+     * re-enable once migrated to the shared daisy-touchpad.dtsi blob. */
     touchpad: touchpad@2c {
         compatible = "zmk,hid-touchpad";
-        status = "okay";
+        status = "disabled";
         reg = <0x2c>;
         dr-gpios = <&gpio1 11 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-        // Instead of parsing the HID report descriptor in firmware
-        // We configure the report IDs and report structure here
-        // PCT3854
-        mouse-report-id = <2>;
-        inputmode-report-id = <6>;
-        relative-x-off = <4>;
-        relative-x-len = <2>;
-        relative-y-off = <6>;
-        relative-y-len = <2>;
-        button-off = <3>;
-        button-bit = <0>;
     };
+};
+
+/* Touchpad is disabled above, so disable its companion HID interface too —
+ * otherwise the new USBD stack tries to init it with no registered ops. */
+&tp_hid {
+    status = "disabled";
 };
