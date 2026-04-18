@@ -9,6 +9,7 @@
 
 #include <zephyr/usb/usbd.h>
 #include <zephyr/usb/class/usbd_hid.h>
+#include <zephyr/drivers/usb/usb_buf.h>
 
 #include <zmk/usb.h>
 #include <zmk/hid.h>
@@ -185,12 +186,29 @@ static struct hid_device_ops ops = {
     .set_protocol = set_protocol_cb,
 };
 
+/* Bounce reports through a UDC-aligned static buffer. ZMK report structs are
+ * __packed (1-byte alignment), but the DWC2 DMA path rejects buffers less
+ * aligned than USB_BUF_ALIGN. Matches the in-report-size of the keyboard-hid
+ * node (64 bytes); submissions are synchronous because ops has no
+ * input_report_done callback, so the buffer is free again on return. */
+UDC_STATIC_BUF_DEFINE(hid_tx_buf, 64);
+static K_MUTEX_DEFINE(hid_tx_mutex);
+
 static int zmk_usb_hid_send_report(const uint8_t *report, size_t len) {
     if (!hid_ready) {
         return -ENODEV;
     }
 
-    return hid_device_submit_report(hid_dev, len, report);
+    if (len > sizeof(hid_tx_buf)) {
+        LOG_ERR("HID report too large: %zu > %zu", len, sizeof(hid_tx_buf));
+        return -EINVAL;
+    }
+
+    k_mutex_lock(&hid_tx_mutex, K_FOREVER);
+    memcpy(hid_tx_buf, report, len);
+    int ret = hid_device_submit_report(hid_dev, len, hid_tx_buf);
+    k_mutex_unlock(&hid_tx_mutex);
+    return ret;
 }
 
 int zmk_usb_hid_send_keyboard_report(void) {
