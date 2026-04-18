@@ -1,0 +1,93 @@
+/ {
+    // Delete led3 which we don't use
+    leds {
+        /delete-node/ led_3;
+    };
+    aliases {
+        /delete-property/ led3;
+    };
+
+    chosen {
+        zmk,keyboard-hid = &hid_dev_0;
+    };
+
+    hid_dev_0: hid_dev_0 {
+        compatible = "zephyr,hid-device";
+        label = "HID0";
+        protocol-code = "keyboard";
+        in-report-size = <64>;
+        in-polling-period-us = <1000>;
+    };
+};
+
+/* Touchpad passthrough isn't wired on the dev kit (touchpad@2c is disabled
+ * above), so disable the companion HID interface too — otherwise the new USBD
+ * stack tries to init it, finds no registered ops, and fails class init. */
+&tp_hid {
+    status = "disabled";
+};
+
+/ {
+    behaviors {
+        hw_soft_off: hw_soft_off {
+            compatible = "zmk,behavior-soft-off";
+            #binding-cells = <0>;
+        };
+    };
+
+    soft_off_direct_input: soft_off_direct_input {
+        compatible = "zmk,input-gpio-direct";
+        input-keys = <&button0>;
+        wakeup-source;
+    };
+
+    soft_off_sideband_behaviors {
+        compatible = "zmk,input-sideband-behaviors";
+        input = <&soft_off_direct_input>;
+        soft_off {
+            row = <0>;
+            column = <0>;
+            bindings = <&hw_soft_off>;
+        };
+    };
+
+    soft_off_wakers {
+        compatible = "zmk,soft-off-wakeup-sources";
+        status = "okay";
+
+        wakeup-sources = <&soft_off_direct_input>;
+    };
+};
+
+&pinctrl {
+    i2c21_default: i2c21_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 1, 2)>,
+                    <NRF_PSEL(TWIM_SCL, 1, 3)>;
+        };
+    };
+
+    i2c21_sleep: i2c21_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 1, 2)>,
+                    <NRF_PSEL(TWIM_SCL, 1, 3)>;
+            low-power-enable;
+        };
+    };
+};
+
+&i2c21 {
+    status = "disabled";
+    pinctrl-0 = <&i2c21_default>;
+    pinctrl-1 = <&i2c21_sleep>;
+    pinctrl-names = "default", "sleep";
+
+    touchpad: touchpad@2c {
+        #include "../daisy-touchpad.dtsi"
+        dr-gpios = <&gpio0 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+        /* Dev kit has no touchpad attached — override the
+         * "okay" default from daisy-touchpad.dtsi so the driver
+         * (and its I2C bus dependency) aren't instantiated. */
+        status = "disabled";
+    };
+};

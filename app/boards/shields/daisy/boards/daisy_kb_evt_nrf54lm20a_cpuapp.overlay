@@ -1,0 +1,64 @@
+/ {
+    chosen {
+        zmk,keyboard-hid = &hid_dev_0;
+    };
+
+    hid_dev_0: hid_dev_0 {
+        compatible = "zephyr,hid-device";
+        label = "HID0";
+        protocol-code = "keyboard";
+        in-report-size = <64>;
+        in-polling-period-us = <1000>;
+    };
+};
+
+/* Reroute the shield's direct button input at the KB EVT's pairing/mode
+ * switches (declared as gpio-keys on the board). */
+&buttons_input {
+    /delete-property/ input-gpios;
+    input-keys = <&pairing_button &protocol_switch>;
+};
+
+/* Daisy EVT matrix: KSI0..7 on P0.00..P0.07, KSO0..17 on P1.00..P1.17. */
+&matrix_input {
+    col-gpios
+        = <&gpio1  0 GPIO_ACTIVE_HIGH> // KSO0
+        , <&gpio1  1 GPIO_ACTIVE_HIGH> // KSO1
+	// Changing to P1.18 in DVT1
+        , <&gpio1  2 GPIO_ACTIVE_HIGH> // KSO2
+	// Changing to P1.19 in DVT1
+        , <&gpio1  3 GPIO_ACTIVE_HIGH> // KSO3
+        , <&gpio1  4 GPIO_ACTIVE_HIGH> // KSO4
+        , <&gpio1  5 GPIO_ACTIVE_HIGH> // KSO5
+        , <&gpio1  6 GPIO_ACTIVE_HIGH> // KSO6
+        , <&gpio1  7 GPIO_ACTIVE_HIGH> // KSO7
+        , <&gpio1  8 GPIO_ACTIVE_HIGH> // KSO8
+        , <&gpio1  9 GPIO_ACTIVE_HIGH> // KSO9
+        , <&gpio1 10 GPIO_ACTIVE_HIGH> // KSO10
+        , <&gpio1 11 GPIO_ACTIVE_HIGH> // KSO11
+        , <&gpio1 12 GPIO_ACTIVE_HIGH> // KSO12
+        , <&gpio1 13 GPIO_ACTIVE_HIGH> // KSO13
+        , <&gpio1 14 GPIO_ACTIVE_HIGH> // KSO14
+        , <&gpio1 15 GPIO_ACTIVE_HIGH> // KSO15
+        , <&gpio1 16 GPIO_ACTIVE_HIGH> // KSO16
+        , <&gpio1 17 GPIO_ACTIVE_HIGH> // KSO17
+        ;
+
+    row-gpios
+        = <&gpio0 0 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI0
+        , <&gpio0 1 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI1
+        , <&gpio0 2 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI2
+        , <&gpio0 3 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI3
+        , <&gpio0 4 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI4
+        , <&gpio0 5 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI5
+        , <&gpio0 6 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI6
+        , <&gpio0 7 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)> // KSI7
+        ;
+};
+
+&i2c22 {
+    touchpad: touchpad@2c {
+        #include "../daisy-touchpad.dtsi"
+        dr-gpios = <&gpio3 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    };
+};
