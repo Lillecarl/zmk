@@ -1,0 +1,39 @@
+# Copyright (c) 2026 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Deghosting wrapper around another matrix-style input device.
+
+  Observes ABS_X/ABS_Y/BTN_TOUCH events from the upstream input device and
+  re-emits only the key events that are not part of a ghosting rectangle
+  (three keys pressed at the corners of a rectangle would otherwise cause
+  the fourth to appear pressed on a 2KRO matrix). Ghosted presses are
+  suppressed and re-emitted later when the rectangle breaks.
+
+  Point the chosen `zmk,matrix-input` (or a physical layout's `input`
+  property) at this node rather than the raw matrix input.
+
+compatible: "zmk,input-deghost"
+
+include: base.yaml
+
+properties:
+  input:
+    type: phandle
+    required: true
+    description: Upstream input device whose events are deghosted.
+  rows:
+    type: int
+    description: |
+      Matrix rows. If omitted, taken from the `rows` property of `transform`.
+  columns:
+    type: int
+    description: |
+      Matrix columns. If omitted, taken from the `columns` property of
+      `transform`.
+  transform:
+    type: phandle
+    description: |
+      Optional matrix transform. When present, deghosting only considers
+      positions that exist in the transform's map; keys absent from the
+      physical layout are ignored when looking for ghost rectangles.

@@ -37,7 +37,7 @@
         };
 
         matrix {
-            input = <&matrix_input>;
+            input = <&deghost_input>;
         };
     };
 
@@ -52,9 +52,11 @@
             ;
     };
 
-    // TODO: no input-deghost driver yet; the kscan-deghost wrapper
-    // was dropped when migrating off the kscan subsystem. Reintroduce
-    // once a zmk,input-deghost driver lands.
+    deghost_input: input_deghost {
+        compatible = "zmk,input-deghost";
+        input = <&matrix_input>;
+        transform = <&matrix_transform>;
+    };
 
     matrix_input: input_matrix {
         compatible = "zmk,input-gpio-matrix";

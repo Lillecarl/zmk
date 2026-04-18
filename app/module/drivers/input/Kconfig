@@ -27,6 +27,12 @@ config ZMK_INPUT_COMPOSITE
     depends on DT_HAS_ZMK_INPUT_COMPOSITE_ENABLED
     select INPUT
 
+config ZMK_INPUT_DEGHOST
+    bool "Deghost input driver"
+    default y
+    depends on DT_HAS_ZMK_INPUT_DEGHOST_ENABLED
+    select INPUT
+
 if ZMK_INPUT_GPIO_DIRECT
 
 config ZMK_INPUT_DIRECT_POLLING
