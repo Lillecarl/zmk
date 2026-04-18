@@ -30,6 +30,11 @@ USBD_DESC_CONFIG_DEFINE(zmk_fs_cfg_desc, "FS Configuration");
 /* Full speed configuration (max power = 125 * 2mA = 250mA) */
 USBD_CONFIGURATION_DEFINE(zmk_fs_config, USB_SCD_REMOTE_WAKEUP, 125, &zmk_fs_cfg_desc);
 
+#if USBD_SUPPORTS_HIGH_SPEED
+USBD_DESC_CONFIG_DEFINE(zmk_hs_cfg_desc, "HS Configuration");
+USBD_CONFIGURATION_DEFINE(zmk_hs_config, USB_SCD_REMOTE_WAKEUP, 125, &zmk_hs_cfg_desc);
+#endif
+
 /* USB device context */
 USBD_DEVICE_DEFINE(zmk_usbd, DEVICE_DT_GET(DT_NODELABEL(zephyr_udc0)),
                    CONFIG_USB_DEVICE_VID, CONFIG_USB_DEVICE_PID);
@@ -122,6 +127,29 @@ static int zmk_usb_init(void) {
         LOG_ERR("Failed to add serial number descriptor (%d)", err);
         return err;
     }
+
+#if USBD_SUPPORTS_HIGH_SPEED
+    if (usbd_caps_speed(&zmk_usbd) == USBD_SPEED_HS) {
+        err = usbd_add_configuration(&zmk_usbd, USBD_SPEED_HS, &zmk_hs_config);
+        if (err) {
+            LOG_ERR("Failed to add HS configuration (%d)", err);
+            return err;
+        }
+
+        err = usbd_register_all_classes(&zmk_usbd, USBD_SPEED_HS, 1, NULL);
+        if (err) {
+            LOG_ERR("Failed to register HS USB classes (%d)", err);
+            return err;
+        }
+
+        if (IS_ENABLED(CONFIG_USBD_CDC_ACM_CLASS)) {
+            usbd_device_set_code_triple(&zmk_usbd, USBD_SPEED_HS,
+                                        USB_BCC_MISCELLANEOUS, 0x02, 0x01);
+        } else {
+            usbd_device_set_code_triple(&zmk_usbd, USBD_SPEED_HS, 0, 0, 0);
+        }
+    }
+#endif
 
     err = usbd_add_configuration(&zmk_usbd, USBD_SPEED_FS, &zmk_fs_config);
     if (err) {
