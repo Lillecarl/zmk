@@ -10,6 +10,12 @@
         in-report-size = <64>;
         in-polling-period-us = <1000>;
     };
+
+    /* Layout strap GPIOs (read at boot to detect ANSI/ISO/JIS). */
+    zephyr,user {
+        iso-strap-gpios = <&gpio3 0 GPIO_ACTIVE_HIGH>;
+        ansi-strap-gpios = <&gpio3 1 GPIO_ACTIVE_HIGH>;
+    };
 };
 
 /* Reroute the shield's direct button input at the KB EVT's pairing/mode

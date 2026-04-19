@@ -82,6 +82,12 @@
 		};
 	};
 
+	/* Layout strap GPIOs (read at boot to detect ANSI/ISO/JIS). */
+	zephyr,user {
+		iso-strap-gpios = <&gpio0 30 GPIO_ACTIVE_HIGH>;
+		ansi-strap-gpios = <&gpio0 31 GPIO_ACTIVE_HIGH>;
+	};
+
 	/* These aliases are provided for compatibility with samples */
 	aliases {
 		led0 = &red_led;
