@@ -4,7 +4,9 @@
 if SHIELD_DAISY_BASE
 
 config ZMK_KEYBOARD_NAME
-    default "Framework Wireless Touchpad Keyboard"
+    # TODO: Full name (Current limit is 16 - BT_DEVICE_NAME_MAX)
+    #        1234567890123456
+    default "Framework TP KB"
 
 config ZMK_PM_SOFT_OFF
     default y if BOARD_NRF52840DK_NRF52840
