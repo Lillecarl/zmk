@@ -161,7 +161,7 @@
 		compatible = "nordic,npm1300";
 		reg = <0x6b>;
 
-		npm1300_ek_leds: leds {
+		pairing_leds: npm1300_ek_leds: leds {
 			compatible = "nordic,npm1300-led";
 			nordic,led0-mode = "host";
 			nordic,led1-mode = "host";

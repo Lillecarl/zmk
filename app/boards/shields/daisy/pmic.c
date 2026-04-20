@@ -27,8 +27,23 @@
 #define DT_DRV_COMPAT zmk_behavior_led_trigger
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
 
-static const struct device *pmic_leds = DEVICE_DT_GET(DT_NODELABEL(npm1300_ek_leds));
-static const struct device *rgb_leds = DEVICE_DT_GET(DT_COMPAT_GET_ANY_STATUS_OKAY(pwm_leds));
+/* Boards using the daisy shield expose their 3-channel pairing indicator
+ * via a &pairing_leds node (npm1300 LED controller on flower/daisy, PWM
+ * whites on daisy_kb_evt). led_on/off work on both via the LED API. The
+ * RGB status indicator is a pwm-leds node labeled rgb1_red_pwm_led. */
+#define HAS_PAIRING_LEDS DT_NODE_EXISTS(DT_NODELABEL(pairing_leds))
+#define HAS_STATUS_RGB   DT_NODE_EXISTS(DT_NODELABEL(rgb1_red_pwm_led))
+
+#if HAS_PAIRING_LEDS
+static const struct device *pairing_leds = DEVICE_DT_GET(DT_NODELABEL(pairing_leds));
+#endif
+#if HAS_STATUS_RGB
+/* Use the parent pwm-leds node explicitly — boards with more than one
+ * pwm-leds instance (e.g. daisy_kb_evt has a separate white-LED block)
+ * would otherwise get a non-deterministic pick from DT_COMPAT_GET_ANY. */
+static const struct device *rgb_leds =
+	DEVICE_DT_GET(DT_PARENT(DT_NODELABEL(rgb1_red_pwm_led)));
+#endif
 static const struct gpio_dt_spec protocol_switch = GPIO_DT_SPEC_GET(DT_NODELABEL(protocol_switch), gpios);
 
 /* State of the protocol switch (BLE or USB). 1 if set to USB */
@@ -46,6 +61,7 @@ ZMK_SUBSCRIPTION(daisy_leds, zmk_usb_conn_state_changed);
 ZMK_SUBSCRIPTION(daisy_leds, zmk_ble_active_profile_changed);
 #endif
 
+#if HAS_PAIRING_LEDS
 struct led_blink_context {
     struct k_work_delayable blink_work;
     uint32_t led_idx;
@@ -62,9 +78,9 @@ static void led_blink_handler(struct k_work *work)
     ctx->is_on = !ctx->is_on;
 
     if (ctx->is_on) {
-        led_on(pmic_leds, ctx->led_idx);
+        led_on(pairing_leds, ctx->led_idx);
     } else {
-        led_off(pmic_leds, ctx->led_idx);
+        led_off(pairing_leds, ctx->led_idx);
     }
 
     /* Blink again after timeout */
@@ -73,7 +89,7 @@ static void led_blink_handler(struct k_work *work)
 
 void start_blinking_led(uint32_t led_idx, uint32_t period_ms)
 {
-    if (!device_is_ready(pmic_leds)) {
+    if (!device_is_ready(pairing_leds)) {
         printk("LED device not ready\n");
         return;
     }
@@ -92,8 +108,9 @@ void stop_blinking_led(void)
     k_work_cancel_delayable(&led_ctx.blink_work);
 
     /* Ensure LED is off */
-    led_off(pmic_leds, led_ctx.led_idx);
+    led_off(pairing_leds, led_ctx.led_idx);
 }
+#endif /* HAS_PAIRING_LEDS */
 
 #define BRT        25
 #define SET_OFF    set_rgb_color(  0,   0,   0)
@@ -106,6 +123,7 @@ void stop_blinking_led(void)
 #define SET_CYAN   set_rgb_color(  0, BRT, BRT)
 #define SET_WHITE  set_rgb_color(BRT, BRT, BRT)
 
+#if HAS_STATUS_RGB
 void set_rgb_color(uint8_t r, uint8_t g, uint8_t b)
 {
     if (!device_is_ready(rgb_leds)) {
@@ -116,6 +134,7 @@ void set_rgb_color(uint8_t r, uint8_t g, uint8_t b)
     led_set_brightness(rgb_leds, 1, g);
     led_set_brightness(rgb_leds, 2, b);
 }
+#endif /* HAS_STATUS_RGB */
 
 void check_protocol_switch()
 {
@@ -125,6 +144,7 @@ void check_protocol_switch()
 	zmk_ble_adv_enabled_set(!protocol_switch_usb);
 }
 
+#if HAS_STATUS_RGB
 void update_power_led(void)
 {
 	uint8_t soc = zmk_battery_state_of_charge();
@@ -142,7 +162,7 @@ void update_power_led(void)
 	if (conn_state == ZMK_USB_CONN_NONE) {
 		if (soc == 0) {
 			// Purple - For debugging only. Happens during startup
-			// SET_PURPLE;
+			SET_PURPLE;
 		} else if (soc < 10) {
 			// Red
 			SET_RED;
@@ -178,14 +198,16 @@ static int led_battery_listener_cb(const zmk_event_t *eh) {
 ZMK_LISTENER(led_battery_listener, led_battery_listener_cb);
 ZMK_SUBSCRIPTION(led_battery_listener, zmk_battery_state_changed);
 #endif // IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+#endif /* HAS_STATUS_RGB */
 
 void update_ble_leds(void)
 {
 	check_protocol_switch();
+#if HAS_PAIRING_LEDS
 	/* Stop all blinking and turn all LEDs off. Start clean */
 	stop_blinking_led();
 	for (int i = 0; i < 3; i++) {
-		led_off(pmic_leds, i);
+		led_off(pairing_leds, i);
 	}
 
 	/* Check the switch status not the currently selected transport.
@@ -200,10 +222,10 @@ void update_ble_leds(void)
 		int led_index = 2 - i;
 		if (i != zmk_ble_active_profile_index()) {
 			/* Turn LEDs of not active profiles off */
-			led_off(pmic_leds, led_index);
+			led_off(pairing_leds, led_index);
 		} else if (zmk_ble_active_profile_is_connected()) {
 			/* Paired and connected, solid on */
-			led_on(pmic_leds, led_index);
+			led_on(pairing_leds, led_index);
 		} else if (zmk_ble_active_profile_is_open()) {
 			/* Fast blink if nothing paired */
 			start_blinking_led(led_index, 500);
@@ -212,6 +234,7 @@ void update_ble_leds(void)
 			start_blinking_led(led_index, 1500);
 		}
 	}
+#endif /* HAS_PAIRING_LEDS */
 }
 
 static int daisy_leds_update_listener(const zmk_event_t *eh)
@@ -225,7 +248,9 @@ static int daisy_leds_update_listener(const zmk_event_t *eh)
 		printk("zoid: usb_conn_state_changed\n");
 		printk("zoid: zmk_usb_is_powered: %d\n", zmk_usb_is_powered());
 		printk("zoid: zmk_usb_get_conn_state: %d\n", zmk_usb_get_conn_state());
+#if HAS_STATUS_RGB
 		update_power_led();
+#endif
 	}
 
 	if (ble_changed) {
@@ -246,10 +271,12 @@ static int daisy_leds_update_listener(const zmk_event_t *eh)
 		printk("zoid: endpoint_changed\n");
 		if (ep_changed->endpoint.transport == ZMK_TRANSPORT_USB) {
 			printk("zoid: endpoint.transport: USB\n");
+#if HAS_PAIRING_LEDS
 			// All LEDs off
-			led_off(pmic_leds, 0U);
-			led_off(pmic_leds, 1U);
-			led_off(pmic_leds, 2U);
+			led_off(pairing_leds, 0U);
+			led_off(pairing_leds, 1U);
+			led_off(pairing_leds, 2U);
+#endif
 		} else if (ep_changed->endpoint.transport == ZMK_TRANSPORT_BLE) {
 			printk("zoid: endpoint.transport: BLE\n");
 			printk("zoid: endpoint.ble.profile_index: %d\n", ep_changed->endpoint.ble.profile_index);
@@ -264,15 +291,19 @@ static int daisy_leds_update_listener(const zmk_event_t *eh)
 
 int led_init(void)
 {
-	if (!device_is_ready(pmic_leds)) {
+#if HAS_PAIRING_LEDS
+	if (!device_is_ready(pairing_leds)) {
 		printk("Error: PMIC led device is not ready\n");
 		return 0;
 	}
+#endif
 
+#if HAS_STATUS_RGB
 	if (!device_is_ready(rgb_leds)) {
 		printk("Error: PWM LED device %s is not ready", rgb_leds->name);
 		return 0;
 	}
+#endif
 
 	protocol_switch_usb = gpio_pin_get_dt(&protocol_switch);
 	printk("daisy: Protocol switch on boot: %s (%d)\n",
@@ -288,7 +319,9 @@ int led_init(void)
 		zmk_endpoint_set_preferred_transport(ZMK_TRANSPORT_BLE);
 
 	/* Initialize the status LEDs */
+#if HAS_STATUS_RGB
 	update_power_led();
+#endif
 	update_ble_leds();
 
 	return 0;
