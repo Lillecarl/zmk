@@ -20,10 +20,10 @@
 
 /* Reroute the shield's direct button input at the KB EVT's pairing/mode
  * switches (declared as gpio-keys on the board). */
-&buttons_input {
-    /delete-property/ input-gpios;
-    input-keys = <&pairing_button &protocol_switch>;
-};
+// &buttons_input {
+//     /delete-property/ input-gpios;
+//     input-keys = <&pairing_button &protocol_switch>;
+// };
 
 /* Daisy EVT matrix: KSI0..7 on P0.00..P0.07, KSO0..17 on P1.00..P1.17. */
 &matrix_input {
