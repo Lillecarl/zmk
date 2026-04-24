@@ -25,7 +25,6 @@ manifest:
           - hal_st
           - hal_ti
           - loramac-node
-          - mcuboot
           - mcumgr
           - net-tools
           - openthread
