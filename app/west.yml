@@ -10,7 +10,7 @@ manifest:
     - name: zephyr-private
       path: zephyr
       remote: FrameworkComputer
-      revision: d6616a2d742137c80bf1cab84511ca761486884e
+      revision: 3f5600df8d90c03eb715b87d8692b4e9fadcce41
       clone-depth: 1
       import:
         name-blocklist:
@@ -45,7 +45,7 @@ manifest:
       path: modules/msgs/zmk-studio-messages
       remote: zmkfirmware
     - name: zephyr-hid-touchpad-module
-      revision: 4b95a1ad6ef389b27970177cc64520ae055b4cc2
+      revision: 4dd4d1589e1da32c3fdbe0dd3d6ac4c004edb405
       remote: FrameworkComputer
   group-filter: [+optional]
   self:
