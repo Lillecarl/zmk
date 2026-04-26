@@ -9,6 +9,8 @@
 
     chosen {
         zmk,keyboard-hid = &hid_dev_0;
+        zephyr,boot-mode = &boot_mode0;
+        zephyr,uart-mcumgr = &mcumgr_cdc_acm;
     };
 
     hid_dev_0: hid_dev_0 {
@@ -19,6 +21,25 @@
         in-polling-period-us = <1000>;
     };
 };
+
+&gpregret1 {
+    status = "okay";
+
+    boot_mode0: boot_mode@0 {
+        compatible = "zephyr,retention";
+        status = "okay";
+        reg = <0x0 0x1>;
+    };
+};
+
+&zephyr_udc0 {
+    mcumgr_cdc_acm: mcumgr_cdc_acm {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "Daisy MCUmgr";
+    };
+};
+
+#include "nrf54lm20a_partitions.dtsi"
 
 /* Touchpad passthrough isn't wired on the dev kit (touchpad@2c is disabled
  * above), so disable the companion HID interface too — otherwise the new USBD

@@ -1,6 +1,8 @@
 / {
     chosen {
         zmk,keyboard-hid = &hid_dev_0;
+        zephyr,boot-mode = &boot_mode0;
+        zephyr,uart-mcumgr = &mcumgr_cdc_acm;
     };
 
     hid_dev_0: hid_dev_0 {
@@ -17,6 +19,25 @@
         ansi-strap-gpios = <&gpio3 1 GPIO_ACTIVE_HIGH>;
     };
 };
+
+&gpregret1 {
+    status = "okay";
+
+    boot_mode0: boot_mode@0 {
+        compatible = "zephyr,retention";
+        status = "okay";
+        reg = <0x0 0x1>;
+    };
+};
+
+&zephyr_udc0 {
+    mcumgr_cdc_acm: mcumgr_cdc_acm {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "Daisy MCUmgr";
+    };
+};
+
+#include "nrf54lm20a_partitions.dtsi"
 
 /* Reroute the shield's direct button input at the KB EVT's pairing/mode
  * switches (declared as gpio-keys on the board). */
