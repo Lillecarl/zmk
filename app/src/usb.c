@@ -70,10 +70,8 @@ static void usbd_msg_cb(struct usbd_context *const usbd_ctx, const struct usbd_m
         }
         break;
     case USBD_MSG_SUSPEND:
-        conn_state = ZMK_USB_CONN_HID;
-        break;
     case USBD_MSG_RESUME:
-        conn_state = ZMK_USB_CONN_HID;
+        conn_state = is_configured ? ZMK_USB_CONN_HID : ZMK_USB_CONN_POWERED;
         break;
     case USBD_MSG_RESET:
 #if IS_ENABLED(CONFIG_ZMK_USB_BOOT)
