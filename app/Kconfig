@@ -36,6 +36,7 @@ config USB_DEVICE_PID
     default 0x615E
 
 config USB_DEVICE_MANUFACTURER
+    string "USB manufacturer name"
     default "ZMK Project"
 
 config BT_DIS_PNP_VID
