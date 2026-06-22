@@ -9,6 +9,9 @@
 #include <zephyr/kernel.h>
 
 #include <zephyr/usb/usbd.h>
+#include <zephyr/usb/usb_ch9.h>
+
+#include <app_version.h>
 
 #include <zmk/usb.h>
 #include <zmk/event_manager.h>
@@ -38,6 +41,16 @@ USBD_CONFIGURATION_DEFINE(zmk_hs_config, USB_SCD_REMOTE_WAKEUP, 125, &zmk_hs_cfg
 /* USB device context */
 USBD_DEVICE_DEFINE(zmk_usbd, DEVICE_DT_GET(DT_NODELABEL(zephyr_udc0)),
                    CONFIG_USB_DEVICE_VID, CONFIG_USB_DEVICE_PID);
+
+/*
+ * bcdDevice reflects the firmware version from app/VERSION rather than the
+ * default (USB_BCD_DRN), which encodes the Zephyr kernel version. Packed as
+ * BCD 0xMMmp: high byte = major, high nibble = minor, low nibble = patch.
+ * lsusb shows this as e.g. "0.30" for firmware 0.3.0.
+ */
+#define ZMK_USB_BCD_DEVICE                                                                         \
+    ((USB_DEC_TO_BCD(APP_VERSION_MAJOR) << 8) | (USB_DEC_TO_BCD(APP_VERSION_MINOR) << 4) |          \
+     USB_DEC_TO_BCD(APP_PATCHLEVEL))
 
 static enum zmk_usb_conn_state conn_state = ZMK_USB_CONN_NONE;
 static bool is_configured;
@@ -172,6 +185,12 @@ static int zmk_usb_init(void) {
     err = usbd_msg_register_cb(&zmk_usbd, usbd_msg_cb);
     if (err) {
         LOG_ERR("Failed to register message callback (%d)", err);
+        return err;
+    }
+
+    err = usbd_device_set_bcd_device(&zmk_usbd, ZMK_USB_BCD_DEVICE);
+    if (err) {
+        LOG_ERR("Failed to set bcdDevice (%d)", err);
         return err;
     }
 
