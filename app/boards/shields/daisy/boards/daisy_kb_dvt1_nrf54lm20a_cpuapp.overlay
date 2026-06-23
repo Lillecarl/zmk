@@ -51,10 +51,8 @@
     col-gpios
         = <&gpio1  0 GPIO_ACTIVE_HIGH> // KSO0
         , <&gpio1  1 GPIO_ACTIVE_HIGH> // KSO1
-	// Changing to P1.18 in DVT1
-        , <&gpio1  2 GPIO_ACTIVE_HIGH> // KSO2
-	// Changing to P1.19 in DVT1
-        , <&gpio1  3 GPIO_ACTIVE_HIGH> // KSO3
+        , <&gpio1 18 GPIO_ACTIVE_HIGH> // KSO2
+        , <&gpio1 19 GPIO_ACTIVE_HIGH> // KSO3
         , <&gpio1  4 GPIO_ACTIVE_HIGH> // KSO4
         , <&gpio1  5 GPIO_ACTIVE_HIGH> // KSO5
         , <&gpio1  6 GPIO_ACTIVE_HIGH> // KSO6
