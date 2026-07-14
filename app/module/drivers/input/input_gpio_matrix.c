@@ -466,6 +466,18 @@ static int input_matrix_init(const struct device *dev) {
 #if IS_ENABLED(CONFIG_PM_DEVICE)
     pm_device_init_suspended(dev);
 
+    // A `wakeup-source` DT property only marks this device wakeup-*capable*;
+    // it must be wakeup-*enabled* for zmk_pm_suspend_devices() to leave it
+    // armed (its GPIO interrupt/SENSE configured) across deep sleep
+    // (sys_poweroff), so a key press can wake the SoC. The classic kscan
+    // stack gets this enable from physical_layouts.c, but that hook keys off
+    // the layout's `kscan` device and never reaches an input-stack source --
+    // wrappers like input-deghost/input-composite sit between the layout and
+    // this GPIO matrix. So arm ourselves here when declared a wakeup source.
+    if (pm_device_wakeup_is_capable(dev)) {
+        pm_device_wakeup_enable(dev, true);
+    }
+
 #if IS_ENABLED(CONFIG_PM_DEVICE_RUNTIME)
     pm_device_runtime_enable(dev);
 #else
