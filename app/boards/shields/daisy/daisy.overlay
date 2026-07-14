@@ -27,6 +27,16 @@
         in-polling-period-us = <1000>;
     };
 
+    /* Third USB HID interface carrying the vendor-defined factory-test
+     * protocol (factory_hid.c). Registered only when CONFIG_DAISY_FACTORY=y. */
+    factory_hid: factory_hid {
+        compatible = "zephyr,hid-device";
+        label = "HID_FACTORY";
+        protocol-code = "none";
+        in-report-size = <32>;
+        in-polling-period-us = <1000>;
+    };
+
     macros {
         ZMK_MACRO(ble0,
             wait-ms = <1>;
