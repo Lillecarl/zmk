@@ -11,7 +11,7 @@
 #include <zephyr/usb/usbd.h>
 #include <zephyr/usb/usb_ch9.h>
 
-#include <app_version.h>
+#include <zephyr/app_version.h>
 
 #include <zmk/usb.h>
 #include <zmk/event_manager.h>
