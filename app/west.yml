@@ -10,7 +10,7 @@ manifest:
     - name: zephyr-private
       path: zephyr
       remote: FrameworkComputer
-      revision: 3f5600df8d90c03eb715b87d8692b4e9fadcce41
+      revision: b9676d2049449fa26f1b7ca4447aebd4c37c674d
       clone-depth: 1
       import:
         name-blocklist:
