@@ -138,15 +138,18 @@ static int set_report_cb(const struct device *dev, const uint8_t type, const uin
         switch (id) {
 #if IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)
         case ZMK_HID_REPORT_ID_LEDS: {
-            if (len != sizeof(struct zmk_hid_led_report_body)) {
+            /* The USB-next HID class passes the full control payload, including
+             * the leading report-ID byte, so the buffer is a whole
+             * zmk_hid_led_report (report_id + body), not just the body. */
+            if (len != sizeof(struct zmk_hid_led_report)) {
                 LOG_ERR("LED set report is malformed: length=%d", len);
                 return -EINVAL;
             }
-            struct zmk_hid_led_report_body *report = (struct zmk_hid_led_report_body *)buf;
+            struct zmk_hid_led_report *report = (struct zmk_hid_led_report *)buf;
             struct zmk_endpoint_instance endpoint = {
                 .transport = ZMK_TRANSPORT_USB,
             };
-            zmk_hid_indicators_process_report(report, endpoint);
+            zmk_hid_indicators_process_report(&report->body, endpoint);
             return 0;
         }
 #endif // IS_ENABLED(CONFIG_ZMK_HID_INDICATORS)

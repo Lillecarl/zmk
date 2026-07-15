@@ -21,7 +21,7 @@ static sys_slist_t widgets = SYS_SLIST_STATIC_INIT(&widgets);
 
 struct battery_status_state {
     uint8_t level;
-#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK) || IS_ENABLED(CONFIG_USB_DEVICE_STACK_NEXT)
     bool usb_present;
 #endif
 };
@@ -31,11 +31,11 @@ static void set_battery_symbol(lv_obj_t *label, struct battery_status_state stat
 
     uint8_t level = state.level;
 
-#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK) || IS_ENABLED(CONFIG_USB_DEVICE_STACK_NEXT)
     if (state.usb_present) {
         strcpy(text, LV_SYMBOL_CHARGE " ");
     }
-#endif /* IS_ENABLED(CONFIG_USB_DEVICE_STACK) */
+#endif /* IS_ENABLED(CONFIG_USB_DEVICE_STACK) || IS_ENABLED(CONFIG_USB_DEVICE_STACK_NEXT) */
 
 #if IS_ENABLED(CONFIG_ZMK_WIDGET_BATTERY_STATUS_SHOW_PERCENTAGE)
     char perc[5] = {};
@@ -67,9 +67,9 @@ static struct battery_status_state battery_status_get_state(const zmk_event_t *e
 
     return (struct battery_status_state){
         .level = (ev != NULL) ? ev->state_of_charge : zmk_battery_state_of_charge(),
-#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK) || IS_ENABLED(CONFIG_USB_DEVICE_STACK_NEXT)
         .usb_present = zmk_usb_is_powered(),
-#endif /* IS_ENABLED(CONFIG_USB_DEVICE_STACK) */
+#endif /* IS_ENABLED(CONFIG_USB_DEVICE_STACK) || IS_ENABLED(CONFIG_USB_DEVICE_STACK_NEXT) */
     };
 }
 
@@ -77,9 +77,9 @@ ZMK_DISPLAY_WIDGET_LISTENER(widget_battery_status, struct battery_status_state,
                             battery_status_update_cb, battery_status_get_state)
 
 ZMK_SUBSCRIPTION(widget_battery_status, zmk_battery_state_changed);
-#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK) || IS_ENABLED(CONFIG_USB_DEVICE_STACK_NEXT)
 ZMK_SUBSCRIPTION(widget_battery_status, zmk_usb_conn_state_changed);
-#endif /* IS_ENABLED(CONFIG_USB_DEVICE_STACK) */
+#endif /* IS_ENABLED(CONFIG_USB_DEVICE_STACK) || IS_ENABLED(CONFIG_USB_DEVICE_STACK_NEXT) */
 
 int zmk_widget_battery_status_init(struct zmk_widget_battery_status *widget, lv_obj_t *parent) {
     widget->obj = lv_label_create(parent);

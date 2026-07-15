@@ -22,7 +22,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <zmk/activity.h>
 
-#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK) || IS_ENABLED(CONFIG_USB_DEVICE_STACK_NEXT)
 #include <zmk/usb.h>
 #endif
 
@@ -31,11 +31,11 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #endif
 
 bool is_usb_power_present(void) {
-#if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+#if IS_ENABLED(CONFIG_USB_DEVICE_STACK) || IS_ENABLED(CONFIG_USB_DEVICE_STACK_NEXT)
     return zmk_usb_is_powered();
 #else
     return false;
-#endif /* IS_ENABLED(CONFIG_USB_DEVICE_STACK) */
+#endif /* IS_ENABLED(CONFIG_USB_DEVICE_STACK) || IS_ENABLED(CONFIG_USB_DEVICE_STACK_NEXT) */
 }
 
 static enum zmk_activity_state activity_state;
