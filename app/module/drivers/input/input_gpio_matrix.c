@@ -167,6 +167,46 @@ static int input_matrix_set_all_outputs(const struct device *dev, const int valu
     return 0;
 }
 
+// Reconfigure every output as a driven (active-level) output. Used to arm the
+// idle state so a keypress on any column reaches a row and fires an interrupt.
+// A plain gpio_pin_set_dt() is not enough because the scan leaves the outputs
+// configured as high-impedance inputs (see input_matrix_read).
+static int input_matrix_drive_all_outputs(const struct device *dev) {
+    const struct input_matrix_config *config = dev->config;
+
+    for (int i = 0; i < config->outputs.len; i++) {
+        const struct gpio_dt_spec *gpio = &config->outputs.gpios[i].spec;
+
+        int err = gpio_pin_configure_dt(gpio, GPIO_OUTPUT_ACTIVE);
+        if (err) {
+            LOG_ERR("Failed to drive output %i: %i", i, err);
+            return err;
+        }
+    }
+
+    return 0;
+}
+
+// Set every output to high-impedance (disconnected). This matrix has no
+// per-key diodes, so only the column being scanned may be driven; any other
+// column left driven low would tie a shared row to its low level and mask a
+// second key on that row (e.g. FN + any key on FN's row).
+static int input_matrix_highz_all_outputs(const struct device *dev) {
+    const struct input_matrix_config *config = dev->config;
+
+    for (int i = 0; i < config->outputs.len; i++) {
+        const struct gpio_dt_spec *gpio = &config->outputs.gpios[i].spec;
+
+        int err = gpio_pin_configure_dt(gpio, GPIO_DISCONNECTED);
+        if (err) {
+            LOG_ERR("Failed to hi-Z output %i: %i", i, err);
+            return err;
+        }
+    }
+
+    return 0;
+}
+
 #if USE_INTERRUPTS
 static int input_matrix_interrupt_configure(const struct device *dev, const gpio_flags_t flags) {
     const struct input_matrix_data *data = dev->data;
@@ -190,9 +230,10 @@ static int input_matrix_interrupt_enable(const struct device *dev) {
         return err;
     }
 
-    // While interrupts are enabled, set all outputs active so a pressed key
-    // will trigger an interrupt.
-    return input_matrix_set_all_outputs(dev, 1);
+    // While interrupts are enabled, drive all outputs active so a pressed key
+    // will trigger an interrupt. Must reconfigure (not just set) because the
+    // scan leaves outputs high-impedance.
+    return input_matrix_drive_all_outputs(dev);
 }
 
 static int input_matrix_interrupt_disable(const struct device *dev) {
@@ -249,11 +290,20 @@ static int input_matrix_read(const struct device *dev) {
     struct input_matrix_data *data = dev->data;
     const struct input_matrix_config *config = dev->config;
 
+    // Diodeless matrix: hold every column high-impedance, then drive exactly
+    // one at a time. Driving the idle columns low (the diode-matrix approach)
+    // would let a second key on the scanned key's row pull that row to a low
+    // driver and mask the press.
+    int err = input_matrix_highz_all_outputs(dev);
+    if (err) {
+        return err;
+    }
+
     // Scan the matrix.
     for (int i = 0; i < config->outputs.len; i++) {
         const struct input_matrix_gpio *out_gpio = &config->outputs.gpios[i];
 
-        int err = gpio_pin_set_dt(&out_gpio->spec, 1);
+        err = gpio_pin_configure_dt(&out_gpio->spec, GPIO_OUTPUT_ACTIVE);
         if (err) {
             LOG_ERR("Failed to set output %i active: %i", out_gpio->index, err);
             return err;
@@ -278,7 +328,8 @@ static int input_matrix_read(const struct device *dev) {
                                 &config->debounce_config);
         }
 
-        err = gpio_pin_set_dt(&out_gpio->spec, 0);
+        // Return this column to high-impedance before driving the next one.
+        err = gpio_pin_configure_dt(&out_gpio->spec, GPIO_DISCONNECTED);
         if (err) {
             LOG_ERR("Failed to set output %i inactive: %i", out_gpio->index, err);
             return err;
