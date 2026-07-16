@@ -25,7 +25,7 @@
 #include <zephyr/drivers/usb/usb_buf.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/sensor/npm13xx_charger.h>
-#include <zephyr/drivers/mfd/npm13xx.h>
+#include <zephyr/drivers/regulator.h>
 #include <zephyr/drivers/led.h>
 #include <zephyr/drivers/gpio.h>
 
@@ -61,10 +61,13 @@ static const struct device *const hid_dev = DEVICE_DT_GET(FACTORY_HID_NODE);
 static const struct device *const charger = DEVICE_DT_GET(DT_NODELABEL(npm1300_charger));
 #endif
 
-/* The nPM1300 MFD itself, used to enter ship mode (battery cutoff). */
-#define HAS_PMIC DT_NODE_EXISTS(DT_NODELABEL(npm1300))
+/* The nPM1300 regulators parent device, used to enter ship mode (battery
+ * cutoff) via the regulator-parent API (per Nordic, the supported way; it
+ * strobes SHIP.TASKENTERSHIPMODE). */
+#define HAS_PMIC DT_NODE_EXISTS(DT_NODELABEL(npm1300_regulators))
 #if HAS_PMIC
-static const struct device *const pmic = DEVICE_DT_GET(DT_NODELABEL(npm1300));
+static const struct device *const pmic_regulators =
+    DEVICE_DT_GET(DT_NODELABEL(npm1300_regulators));
 /* Ship mode powers the board off, so it can't run inline with the response.
  * The handler acks immediately and schedules this to fire shortly after, giving
  * the USB Input report time to reach the host before power drops.
@@ -77,9 +80,11 @@ static void ship_work_handler(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(ship_work, ship_work_handler);
 #define SHIP_ENTER_DELAY_MS 250
 #define SHIP_POLL_INTERVAL_MS 200
-/* Stop polling after this long unplugged-or-not so we don't spin forever if the
- * user never unplugs (e.g. command sent by mistake). */
-#define SHIP_POLL_TIMEOUT_MS 30000
+/* Stop polling after this long so we don't spin forever if the user never
+ * unplugs (e.g. command sent by mistake). Generous: the operator may take a
+ * while to get to the cable, and after unplug the PMIC can keep refusing the
+ * ship task while residual VBUS discharges. */
+#define SHIP_POLL_TIMEOUT_MS (5 * 60 * 1000)
 #define SHIP_POLL_MAX_ATTEMPTS (SHIP_POLL_TIMEOUT_MS / SHIP_POLL_INTERVAL_MS)
 static int ship_poll_attempts;
 #endif
@@ -378,7 +383,7 @@ static bool ship_vbus_present(void) {
 
 static void ship_work_handler(struct k_work *work) {
     ARG_UNUSED(work);
-    if (!device_is_ready(pmic)) {
+    if (!device_is_ready(pmic_regulators)) {
         return;
     }
     /* The PMIC ignores hibernate while VBUS is up. Wait for unplug, re-arming
@@ -392,9 +397,15 @@ static void ship_work_handler(struct k_work *work) {
         return;
     }
     /* Ship mode, not hibernate: hibernate always arms the wake-up timer and
-     * would reboot the board instead of leaving it off until SHPHLD/VBUS. */
-    LOG_INF("VBUS gone, strobing TASKENTERSHIPMODE");
-    int err = mfd_npm13xx_ship_mode(pmic);
+     * would reboot the board instead of leaving it off until SHPHLD/VBUS.
+     *
+     * The PMIC ignores the ship task while residual VBUS is still discharging
+     * (VBUSINSTATUS reads 0x0c -- under-voltage band -- for a while after
+     * unplug, and entry requires VBUS "disconnected and discharged"). If we're
+     * still running next poll, strobe again until the PMIC accepts or the
+     * overall timeout hits. */
+    LOG_INF("ship strobe %d: TASKENTERSHIPMODE", ship_poll_attempts);
+    int err = regulator_parent_ship_mode(pmic_regulators);
     if (err) {
         LOG_ERR("ship mode entry failed: %d", err);
         return;
@@ -413,7 +424,7 @@ static uint8_t handle_ship_mode(void) {
 #if !HAS_PMIC
     return DAISY_FACTORY_ERR_UNSUPPORTED;
 #else
-    if (!device_is_ready(pmic)) {
+    if (!device_is_ready(pmic_regulators)) {
         return DAISY_FACTORY_ERR_HW;
     }
     ship_poll_attempts = 0;
