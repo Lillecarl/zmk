@@ -26,6 +26,7 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/sensor/npm13xx_charger.h>
 #include <zephyr/drivers/regulator.h>
+#include <zephyr/drivers/mfd/npm13xx.h>
 #include <zephyr/drivers/led.h>
 #include <zephyr/drivers/gpio.h>
 
@@ -68,11 +69,22 @@ static const struct device *const charger = DEVICE_DT_GET(DT_NODELABEL(npm1300_c
 
 /* The nPM1300 regulators parent device, used to enter ship mode (battery
  * cutoff) via the regulator-parent API (per Nordic, the supported way; it
- * strobes SHIP.TASKENTERSHIPMODE). */
-#define HAS_PMIC DT_NODE_EXISTS(DT_NODELABEL(npm1300_regulators))
+ * strobes SHIP.TASKENTERSHIPMODE), plus the MFD itself for the VBUS event
+ * registers the entry sequence needs. */
+#define HAS_PMIC                                                                                    \
+    (DT_NODE_EXISTS(DT_NODELABEL(npm1300_regulators)) && DT_NODE_EXISTS(DT_NODELABEL(npm1300)))
 #if HAS_PMIC
 static const struct device *const pmic_regulators =
     DEVICE_DT_GET(DT_NODELABEL(npm1300_regulators));
+static const struct device *const pmic_mfd = DEVICE_DT_GET(DT_NODELABEL(npm1300));
+/* MAIN.EVENTSVBUSIN0SET / ...CLR (base 0x00, offsets 0x16/0x17): bit1 latches
+ * on "VBUS removed", which per the PS is the "disconnected and discharged"
+ * indicator that must precede the ship-mode task. */
+#define NPM13XX_MAIN_BASE 0x00U
+#define MAIN_OFFSET_EVENTSVBUSIN0SET 0x16U
+#define MAIN_OFFSET_EVENTSVBUSIN0CLR 0x17U
+#define EVENT_VBUS_REMOVED 0x02U
+#define EVENTSVBUSIN_ALL 0x3FU
 /* Ship mode powers the board off, so it can't run inline with the response.
  * The handler acks immediately and schedules this to fire shortly after, giving
  * the USB Input report time to reach the host before power drops.
@@ -83,6 +95,13 @@ static const struct device *const pmic_regulators =
  * charger's VBUS status and re-arms itself until VBUS drops, then cuts power. */
 static void ship_work_handler(struct k_work *work);
 static K_WORK_DELAYABLE_DEFINE(ship_work, ship_work_handler);
+/* Dedicated queue: on USB unplug a USB-stack work item blocks the system
+ * workqueue for as long as VBUS is absent (observed: a ship poll due 200 ms
+ * after unplug ran 2 minutes later, at replug, together with the delayed USB
+ * teardown logs). Ship entry must keep polling exactly during that window, so
+ * it cannot share the system workqueue. */
+static K_THREAD_STACK_DEFINE(ship_q_stack, 1024);
+static struct k_work_q ship_q;
 #define SHIP_ENTER_DELAY_MS 250
 #define SHIP_POLL_INTERVAL_MS 200
 /* Stop polling after this long so we don't spin forever if the user never
@@ -378,7 +397,7 @@ static bool ship_vbus_present(void) {
         LOG_WRN("ship poll %d: VBUS status read failed: %d", ship_poll_attempts, err);
         return true;
     }
-    LOG_INF("ship poll %d: VBUSINSTATUS=0x%02x", ship_poll_attempts, (uint8_t)vbus.val1);
+    LOG_DBG("ship poll %d: VBUSINSTATUS=0x%02x", ship_poll_attempts, (uint8_t)vbus.val1);
     /* val1 is the raw VBUS status register; bit 0 = VBUS present. */
     return (vbus.val1 & 0x01) != 0;
 #else
@@ -398,26 +417,47 @@ static void ship_work_handler(struct k_work *work) {
             LOG_WRN("ship mode aborted: VBUS still present after %d ms", SHIP_POLL_TIMEOUT_MS);
             return;
         }
-        k_work_schedule(&ship_work, K_MSEC(SHIP_POLL_INTERVAL_MS));
+        k_work_schedule_for_queue(&ship_q, &ship_work, K_MSEC(SHIP_POLL_INTERVAL_MS));
         return;
     }
+    /* VBUS-present has cleared. Per the PS, the ship task may only be written
+     * once VBUS is "disconnected and discharged", signalled by the latched
+     * "VBUS removed" event -- require that and clear the VBUS events before
+     * strobing. */
+    uint8_t events = 0;
+    int err = mfd_npm13xx_reg_read(pmic_mfd, NPM13XX_MAIN_BASE, MAIN_OFFSET_EVENTSVBUSIN0SET,
+                                   &events);
+    if (err == 0 && !(events & EVENT_VBUS_REMOVED)) {
+        LOG_INF("ship poll %d: VBUS clear but no removed event yet (0x%02x)", ship_poll_attempts,
+                events);
+        goto rearm;
+    }
+    if (err == 0) {
+        err = mfd_npm13xx_reg_write(pmic_mfd, NPM13XX_MAIN_BASE, MAIN_OFFSET_EVENTSVBUSIN0CLR,
+                                    EVENTSVBUSIN_ALL);
+    }
+    if (err) {
+        LOG_ERR("ship events access failed: %d", err);
+        goto rearm;
+    }
+
     /* Ship mode, not hibernate: hibernate always arms the wake-up timer and
      * would reboot the board instead of leaving it off until SHPHLD/VBUS.
-     *
-     * The PMIC ignores the ship task while residual VBUS is still discharging
-     * (VBUSINSTATUS reads 0x0c -- under-voltage band -- for a while after
-     * unplug, and entry requires VBUS "disconnected and discharged"). If we're
-     * still running next poll, strobe again until the PMIC accepts or the
-     * overall timeout hits. */
-    LOG_INF("ship strobe %d: TASKENTERSHIPMODE", ship_poll_attempts);
-    int err = regulator_parent_ship_mode(pmic_regulators);
+     * If we're still running next poll, the PMIC refused (residual VBUS);
+     * strobe again until it accepts or the overall timeout hits. */
+    LOG_INF("ship strobe %d: TASKENTERSHIPMODE (events were 0x%02x)", ship_poll_attempts, events);
+    err = regulator_parent_ship_mode(pmic_regulators);
     if (err) {
         LOG_ERR("ship mode entry failed: %d", err);
         return;
     }
-    /* If we're still alive to log this, the PMIC ignored the task. */
-    k_msleep(50);
-    LOG_ERR("still running 50 ms after TASKENTERSHIPMODE strobe");
+
+rearm:
+    if (++ship_poll_attempts < SHIP_POLL_MAX_ATTEMPTS) {
+        k_work_schedule_for_queue(&ship_q, &ship_work, K_MSEC(SHIP_POLL_INTERVAL_MS));
+    } else {
+        LOG_WRN("ship mode aborted: kept running for %d ms", SHIP_POLL_TIMEOUT_MS);
+    }
 }
 #endif
 
@@ -433,7 +473,7 @@ static uint8_t handle_ship_mode(void) {
         return DAISY_FACTORY_ERR_HW;
     }
     ship_poll_attempts = 0;
-    k_work_schedule(&ship_work, K_MSEC(SHIP_ENTER_DELAY_MS));
+    k_work_schedule_for_queue(&ship_q, &ship_work, K_MSEC(SHIP_ENTER_DELAY_MS));
     return DAISY_FACTORY_OK;
 #endif
 }
@@ -971,6 +1011,14 @@ static int daisy_factory_hid_init(void) {
     }
 
     k_work_init(&process_work, process_work_handler);
+
+#if HAS_PMIC
+    /* Ship-mode poll queue; see ship_q definition for why it's not the
+     * system workqueue. Cooperative priority so USB churn can't starve it. */
+    k_work_queue_start(&ship_q, ship_q_stack, K_THREAD_STACK_SIZEOF(ship_q_stack), K_PRIO_COOP(7),
+                       NULL);
+    k_thread_name_set(&ship_q.thread, "daisy_ship");
+#endif
 
     int err = hid_device_register(hid_dev, factory_report_desc, sizeof(factory_report_desc), &ops);
     if (err) {

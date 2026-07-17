@@ -85,6 +85,10 @@ void activity_work_handler(struct k_work *work) {
             return;
         }
 
+        /* DEBUG (sleep/wake investigation): last breadcrumb before System OFF.
+         * If RTT shows this line and the board never comes back on a keypress,
+         * the wake source isn't rearming across sys_poweroff. Remove when done. */
+        LOG_WRN("activity: entering System OFF (deep sleep) now");
         sys_poweroff();
     } else
 #endif /* IS_ENABLED(CONFIG_ZMK_SLEEP) */
