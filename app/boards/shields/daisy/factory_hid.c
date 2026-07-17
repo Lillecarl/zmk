@@ -32,9 +32,14 @@
 #include <zephyr/app_version.h>
 
 #include <zmk/activity.h>
+#include <zmk/endpoints.h>
+#include <zmk/hid.h>
+#include <dt-bindings/zmk/hid_usage_pages.h>
 
 #if IS_ENABLED(CONFIG_ZMK_BLE)
 #include <zmk/ble.h>
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/addr.h>
 #endif
 
 #if IS_ENABLED(CONFIG_RETENTION_BOOT_MODE)
@@ -586,6 +591,203 @@ static uint8_t handle_bt_clear_bonds(void) {
 #endif
 }
 
+/* Unpair the active profile only. Action-only. Same workqueue-context note as
+ * handle_bt_clear_bonds. */
+static uint8_t handle_bt_unpair(void) {
+#if !IS_ENABLED(CONFIG_ZMK_BLE)
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    zmk_ble_clear_bonds();
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* Switch the active BLE profile. req = [index]. Action-only. */
+static uint8_t handle_bt_prof_select(const uint8_t *req, uint8_t req_len) {
+#if !IS_ENABLED(CONFIG_ZMK_BLE)
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 1) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    int err = zmk_ble_prof_select(req[0]);
+    if (err == -ERANGE) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+    return err ? DAISY_FACTORY_ERR_HW : DAISY_FACTORY_OK;
+#endif
+}
+
+/* Cycle the active BLE profile. Action-only. */
+static uint8_t handle_bt_prof_cycle(bool next) {
+#if !IS_ENABLED(CONFIG_ZMK_BLE)
+    ARG_UNUSED(next);
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    int err = next ? zmk_ble_prof_next() : zmk_ble_prof_prev();
+    return err ? DAISY_FACTORY_ERR_HW : DAISY_FACTORY_OK;
+#endif
+}
+
+/* Report BLE state: active profile, per-profile connected/bonded masks, and
+ * whether advertising is enabled. -> struct daisy_factory_bt_status. */
+static uint8_t handle_bt_status(uint8_t *payload, uint8_t *out_len) {
+#if !IS_ENABLED(CONFIG_ZMK_BLE)
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    struct daisy_factory_bt_status st = {
+        .profile_count = ZMK_BLE_PROFILE_COUNT,
+        .active_index = (uint8_t)zmk_ble_active_profile_index(),
+        .flags = (zmk_ble_active_profile_is_connected() ? DAISY_FACTORY_BT_FLAG_ACTIVE_CONNECTED
+                                                        : 0) |
+                 (zmk_ble_active_profile_is_open() ? DAISY_FACTORY_BT_FLAG_ACTIVE_OPEN : 0) |
+                 (zmk_ble_adv_enabled_get() ? DAISY_FACTORY_BT_FLAG_ADV_ENABLED : 0),
+    };
+    for (uint8_t i = 0; i < MIN(ZMK_BLE_PROFILE_COUNT, 8); i++) {
+        if (zmk_ble_profile_is_connected(i)) {
+            st.connected_mask |= BIT(i);
+        }
+        if (!zmk_ble_profile_is_open(i)) {
+            st.bonded_mask |= BIT(i);
+        }
+    }
+    memcpy(payload, &st, sizeof(st));
+    *out_len = sizeof(st);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* Enable/disable BLE advertising. req = [enable]. Action-only. */
+static uint8_t handle_bt_adv_set(const uint8_t *req, uint8_t req_len) {
+#if !IS_ENABLED(CONFIG_ZMK_BLE)
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 1) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    zmk_ble_adv_enabled_set(req[0] != 0);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* Report the keyboard's BLE addresses: the static identity (scan-report address
+ * when privacy is off) and the address currently being advertised (a rotating
+ * RPA when privacy is on). -> struct daisy_factory_bt_addr. All ZMK profiles
+ * share the one identity. */
+static uint8_t handle_bt_addr(uint8_t *payload, uint8_t *out_len) {
+#if !IS_ENABLED(CONFIG_ZMK_BLE)
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    bt_addr_le_t ids[CONFIG_BT_ID_MAX];
+    size_t count = ARRAY_SIZE(ids);
+
+    bt_id_get(ids, &count);
+    if (count == 0) {
+        /* Stack not ready / no identity yet. */
+        return DAISY_FACTORY_ERR_HW;
+    }
+
+    struct daisy_factory_bt_addr out = {
+        .identity_type = ids[BT_ID_DEFAULT].type,
+        .privacy = IS_ENABLED(CONFIG_BT_PRIVACY) ? 1 : 0,
+    };
+    memcpy(out.identity_val, ids[BT_ID_DEFAULT].a.val, sizeof(out.identity_val));
+
+    /* Current advertised address. With privacy off this is the identity; with
+     * privacy on bt_le_oob_get_local yields the current RPA. NOTE: with privacy
+     * on this call may regenerate the RPA -- validate on hardware that it
+     * matches the address actually on air before relying on it for pairing. */
+    struct bt_le_oob oob;
+    if (bt_le_oob_get_local(BT_ID_DEFAULT, &oob) == 0) {
+        out.current_type = oob.addr.type;
+        memcpy(out.current_val, oob.addr.a.val, sizeof(out.current_val));
+    } else {
+        /* Fall back to the identity if the current address can't be read. */
+        out.current_type = out.identity_type;
+        memcpy(out.current_val, out.identity_val, sizeof(out.current_val));
+    }
+
+    memcpy(payload, &out, sizeof(out));
+    *out_len = sizeof(out);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* Relay a host-displayed passkey to a pending passkey-entry pairing.
+ * req = [passkey u32 little-endian]. Action-only. */
+static uint8_t handle_bt_passkey(const uint8_t *req, uint8_t req_len) {
+#if !IS_ENABLED(CONFIG_ZMK_BLE)
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 4) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    uint32_t passkey = sys_get_le32(req);
+    if (passkey > 999999) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+    int err = zmk_ble_passkey_entry(passkey);
+    if (err == -ENOTSUP) {
+        return DAISY_FACTORY_ERR_UNSUPPORTED;
+    } else if (err == -ENOTCONN) {
+        /* Nothing is awaiting a passkey right now. */
+        return DAISY_FACTORY_ERR_HW;
+    } else if (err) {
+        return DAISY_FACTORY_ERR_HW;
+    }
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* Report HID endpoint routing. -> [preferred, selected, ble_profile]. */
+static uint8_t handle_endpoint_get(uint8_t *payload, uint8_t *out_len) {
+    struct zmk_endpoint_instance selected = zmk_endpoint_get_selected();
+    payload[0] = (uint8_t)zmk_endpoint_get_preferred_transport();
+    payload[1] = (uint8_t)selected.transport;
+#if IS_ENABLED(CONFIG_ZMK_BLE)
+    payload[2] = selected.transport == ZMK_TRANSPORT_BLE ? selected.ble.profile_index : 0;
+#else
+    payload[2] = 0;
+#endif
+    *out_len = 3;
+    return DAISY_FACTORY_OK;
+}
+
+/* Set the preferred transport (persisted). req = [transport]. Action-only.
+ * Routing only: USB stays enumerated (and this interface reachable) either way. */
+static uint8_t handle_endpoint_set(const uint8_t *req, uint8_t req_len) {
+    if (req_len < 1) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    if (req[0] > DAISY_FACTORY_TRANSPORT_BLE) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+    if (zmk_endpoint_set_preferred_transport((enum zmk_transport)req[0]) < 0) {
+        return DAISY_FACTORY_ERR_HW;
+    }
+    return DAISY_FACTORY_OK;
+}
+
+/* Tap a key on the HID keyboard/keypad page so the host receives a real
+ * keystroke over whichever endpoint is selected. req = [usage]. Action-only.
+ * The short sleep between press and release keeps the two reports distinct;
+ * blocking the system workqueue that long is fine in a factory context. */
+static uint8_t handle_key_inject(const uint8_t *req, uint8_t req_len) {
+    if (req_len < 1) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    if (zmk_hid_keyboard_press(req[0]) < 0) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+    int err = zmk_endpoint_send_report(HID_USAGE_KEY);
+    k_msleep(20);
+    if (zmk_hid_keyboard_release(req[0]) < 0 ||
+        zmk_endpoint_send_report(HID_USAGE_KEY) < 0 || err < 0) {
+        return DAISY_FACTORY_ERR_HW;
+    }
+    return DAISY_FACTORY_OK;
+}
+
 /* Read a named GPIO's logical level. req = [gpio_id]; payload out = [level].
  * The level is gpio_pin_get_dt (active-low aware): 1 = asserted. */
 static uint8_t handle_gpio_get(const uint8_t *req, uint8_t req_len, uint8_t *payload,
@@ -698,6 +900,44 @@ static void process_work_handler(struct k_work *work) {
         break;
     case DAISY_FACTORY_CMD_BT_CLEAR_BONDS:
         status = handle_bt_clear_bonds();
+        break;
+    case DAISY_FACTORY_CMD_BT_UNPAIR:
+        status = handle_bt_unpair();
+        break;
+    case DAISY_FACTORY_CMD_BT_PROF_SELECT:
+        status = handle_bt_prof_select(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                       req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_BT_PROF_NEXT:
+        status = handle_bt_prof_cycle(true);
+        break;
+    case DAISY_FACTORY_CMD_BT_PROF_PREV:
+        status = handle_bt_prof_cycle(false);
+        break;
+    case DAISY_FACTORY_CMD_BT_STATUS:
+        status = handle_bt_status(payload, &payload_len);
+        break;
+    case DAISY_FACTORY_CMD_BT_ADV_SET:
+        status = handle_bt_adv_set(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                   req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_BT_ADDR:
+        status = handle_bt_addr(payload, &payload_len);
+        break;
+    case DAISY_FACTORY_CMD_BT_PASSKEY:
+        status = handle_bt_passkey(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                   req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_ENDPOINT_GET:
+        status = handle_endpoint_get(payload, &payload_len);
+        break;
+    case DAISY_FACTORY_CMD_ENDPOINT_SET:
+        status = handle_endpoint_set(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                     req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_KEY_INJECT:
+        status = handle_key_inject(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                   req_buf[DAISY_FACTORY_OFF_LEN]);
         break;
     case DAISY_FACTORY_CMD_GPIO_GET:
         status = handle_gpio_get(&req_buf[DAISY_FACTORY_OFF_PAYLOAD], req_buf[DAISY_FACTORY_OFF_LEN],

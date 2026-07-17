@@ -53,6 +53,11 @@ int zmk_ble_set_device_name(char *name);
 void zmk_ble_adv_enabled_set(bool adv_enabled);
 bool zmk_ble_adv_enabled_get(void);
 
+/* Relay a passkey to a pending passkey-entry pairing (see ble.c). Returns 0 on
+ * success, -ENOTSUP if passkey entry isn't built in, -ENOTCONN if nothing is
+ * currently awaiting a passkey. */
+int zmk_ble_passkey_entry(uint32_t passkey);
+
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 int zmk_ble_put_peripheral_addr(const bt_addr_le_t *addr);
 #endif /* IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) */

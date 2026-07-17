@@ -98,7 +98,89 @@ enum daisy_factory_cmd {
     /* Clear all BLE bonds: every pairing profile is unpaired (persisted
      * immediately) and the keyboard switches back to profile 0. No payload. */
     DAISY_FACTORY_CMD_BT_CLEAR_BONDS = 0x60,
+    /* Unpair the ACTIVE profile only (persisted immediately); the profile
+     * starts advertising as open again. No payload. */
+    DAISY_FACTORY_CMD_BT_UNPAIR = 0x61,
+    /* Switch the active BLE profile. payload: [index u8 0..profile_count-1].
+     * BAD_ARG if the index is out of range. */
+    DAISY_FACTORY_CMD_BT_PROF_SELECT = 0x62,
+    DAISY_FACTORY_CMD_BT_PROF_NEXT = 0x63, /* cycle to the next profile (wraps) */
+    DAISY_FACTORY_CMD_BT_PROF_PREV = 0x64, /* cycle to the previous profile (wraps) */
+    /* -> struct daisy_factory_bt_status. Per-profile masks are bit N ==
+     * profile N. "Bonded" is the inverse of ZMK's "open" (no bond stored). */
+    DAISY_FACTORY_CMD_BT_STATUS = 0x65,
+    /* Enable/disable BLE advertising. payload: [enable u8 (0=off, 1=on)]. */
+    DAISY_FACTORY_CMD_BT_ADV_SET = 0x66,
+    /* Read the BLE identity address (the address seen in scan reports). No
+     * payload in; -> struct daisy_factory_bt_addr. All profiles share this one
+     * identity, so it is not per-profile. */
+    DAISY_FACTORY_CMD_BT_ADDR = 0x67,
+    /* Relay a passkey to a pending passkey-entry pairing (MITM). payload:
+     * [passkey u32 little-endian, 0..999999]. Lets the host complete an
+     * authenticated pair by pushing the host-displayed passkey over USB instead
+     * of a human typing it on the keyboard (the passkey never goes on air).
+     * UNSUPPORTED if passkey entry isn't built in; HW if no pairing is awaiting
+     * a passkey; BAD_ARG if out of range. */
+    DAISY_FACTORY_CMD_BT_PASSKEY = 0x68,
+
+    /* group 0x7: HID endpoints (where input reports are routed) */
+    /* -> [preferred u8 (daisy_factory_transport)][selected u8][ble_profile u8].
+     * `selected` is what is actually in use right now and may be NONE (or
+     * differ from `preferred`) when the preferred transport isn't connected.
+     * `ble_profile` is only meaningful when selected == BLE. */
+    DAISY_FACTORY_CMD_ENDPOINT_GET = 0x70,
+    /* Set the preferred transport (persisted). payload:
+     * [transport u8 (daisy_factory_transport)]. Note: routing only -- the USB
+     * interfaces (including this factory interface) stay up either way. */
+    DAISY_FACTORY_CMD_ENDPOINT_SET = 0x71,
+
+    /* group 0x8: input injection */
+    /* Tap a key: press, send an input report over the selected endpoint,
+     * release, send again. payload: [usage u8, HID keyboard/keypad page].
+     * Meant for end-to-end report-routing tests with an invisible key
+     * (e.g. F24 = 0x73); the host really receives a keystroke. */
+    DAISY_FACTORY_CMD_KEY_INJECT = 0x80,
 };
+
+/* HID transport selector for the ENDPOINT_* commands. Values match ZMK's
+ * enum zmk_transport (settings-stable there, so stable here too). */
+enum daisy_factory_transport {
+    DAISY_FACTORY_TRANSPORT_NONE = 0, /* input reports routed nowhere */
+    DAISY_FACTORY_TRANSPORT_USB = 1,
+    DAISY_FACTORY_TRANSPORT_BLE = 2,
+};
+
+/* BT_STATUS response payload. */
+struct daisy_factory_bt_status {
+    uint8_t profile_count; /* number of BLE profiles (bond slots) */
+    uint8_t active_index;  /* currently active profile */
+    uint8_t flags;         /* DAISY_FACTORY_BT_FLAG_* */
+    uint8_t connected_mask; /* bit N: profile N has an active connection */
+    uint8_t bonded_mask;    /* bit N: profile N has a stored bond */
+} __attribute__((packed));
+
+/* BT_ADDR response payload: the keyboard's BLE addresses.
+ * - `identity_*` is the static identity address (FICR-derived, permanent, from
+ *   bt_id_get) -- what appears in scan reports when privacy is OFF.
+ * - `current_*` is the address actually being advertised right now: equal to
+ *   the identity when privacy is OFF, or the current rotating RPA when privacy
+ *   is ON (from bt_le_oob_get_local).
+ * - `privacy` is 1 when CONFIG_BT_PRIVACY is enabled (current is an RPA that
+ *   rotates every BT_RPA_TIMEOUT), else 0.
+ * Each address is little-endian (same byte order as bt_addr_le_t / HCI --
+ * val[5] is the most-significant byte, printed first in the colon form).
+ * `*_type` is the Bluetooth address type (0 = public, 1 = random). */
+struct daisy_factory_bt_addr {
+    uint8_t identity_type;
+    uint8_t identity_val[6];
+    uint8_t current_type;
+    uint8_t current_val[6];
+    uint8_t privacy;
+} __attribute__((packed));
+
+#define DAISY_FACTORY_BT_FLAG_ACTIVE_CONNECTED (1u << 0)
+#define DAISY_FACTORY_BT_FLAG_ACTIVE_OPEN (1u << 1) /* active profile has no bond */
+#define DAISY_FACTORY_BT_FLAG_ADV_ENABLED (1u << 2)
 
 /* Logical GPIO identifiers for DAISY_FACTORY_CMD_GPIO_GET. Each maps in the
  * firmware to a board gpio_dt_spec; the level returned is the *logical* level

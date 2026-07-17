@@ -642,6 +642,26 @@ static void auth_cancel(struct bt_conn *conn) {
     LOG_DBG("Pairing cancelled: %s", addr);
 }
 
+/* Submit a passkey to a pending passkey-entry pairing directly, bypassing the
+ * on-keyboard digit-by-digit entry. Used by the factory USB interface to relay
+ * a host-displayed passkey over the wire (keeps MITM: the passkey never goes
+ * over the air). Returns -ENOTSUP if passkey entry isn't built in, -ENOTCONN if
+ * no pairing is currently awaiting a passkey. */
+int zmk_ble_passkey_entry(uint32_t passkey) {
+#if IS_ENABLED(CONFIG_ZMK_BLE_PASSKEY_ENTRY)
+    if (!auth_passkey_entry_conn) {
+        return -ENOTCONN;
+    }
+    int err = bt_conn_auth_passkey_entry(auth_passkey_entry_conn, passkey);
+    bt_conn_unref(auth_passkey_entry_conn);
+    auth_passkey_entry_conn = NULL;
+    return err;
+#else
+    ARG_UNUSED(passkey);
+    return -ENOTSUP;
+#endif
+}
+
 static bool pairing_allowed_for_current_profile(struct bt_conn *conn) {
     return zmk_ble_active_profile_is_open() ||
            (IS_ENABLED(CONFIG_BT_SMP_ALLOW_UNAUTH_OVERWRITE) &&
