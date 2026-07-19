@@ -127,6 +127,14 @@ enum daisy_factory_cmd {
      * UNSUPPORTED if passkey entry isn't built in; HW if no pairing is awaiting
      * a passkey; BAD_ARG if out of range. */
     DAISY_FACTORY_CMD_BT_PASSKEY = 0x68,
+    /* Read one BLE profile (bond slot). payload in: [index u8]; out: struct
+     * daisy_factory_bt_profile. BAD_ARG if index >= profile_count (from
+     * BT_STATUS). Reports the peer address stored for that slot -- i.e. which
+     * host the slot is paired with -- plus per-slot bonded/connected/active
+     * flags. The peer address is all-zero (BT_ADDR_LE_ANY) for an open/unbonded
+     * slot. Iterate 0..profile_count on the host to enumerate every slot; ZMK
+     * stores nothing else per slot (the name field is unused). */
+    DAISY_FACTORY_CMD_BT_PROFILE_GET = 0x69,
 
     /* group 0x7: HID endpoints (where input reports are routed) */
     /* -> [preferred u8 (daisy_factory_transport)][selected u8][ble_profile u8].
@@ -186,6 +194,23 @@ struct daisy_factory_bt_addr {
 #define DAISY_FACTORY_BT_FLAG_ACTIVE_CONNECTED (1u << 0)
 #define DAISY_FACTORY_BT_FLAG_ACTIVE_OPEN (1u << 1) /* active profile has no bond */
 #define DAISY_FACTORY_BT_FLAG_ADV_ENABLED (1u << 2)
+
+/* BT_PROFILE_GET response payload: the detail for one bond slot.
+ * - `addr_*` is the bonded peer's address (which host this slot is paired
+ *   with), little-endian / HCI order (val[5] is the MSB, printed first in the
+ *   colon form); addr_val is all-zero when the slot is open (unbonded).
+ * - `addr_type` is the peer's Bluetooth address type (0 = public, 1 = random).
+ * - `flags` carries the per-slot state (DAISY_FACTORY_BT_PROF_FLAG_*). */
+struct daisy_factory_bt_profile {
+    uint8_t index;       /* echoes the requested slot index */
+    uint8_t flags;       /* DAISY_FACTORY_BT_PROF_FLAG_* */
+    uint8_t addr_type;   /* peer address type (0 public, 1 random) */
+    uint8_t addr_val[6]; /* peer address, LE; all-zero if the slot is open */
+} __attribute__((packed));
+
+#define DAISY_FACTORY_BT_PROF_FLAG_BONDED (1u << 0)    /* slot holds a stored bond */
+#define DAISY_FACTORY_BT_PROF_FLAG_CONNECTED (1u << 1) /* slot has an active connection */
+#define DAISY_FACTORY_BT_PROF_FLAG_ACTIVE (1u << 2)    /* slot is the active profile */
 
 /* Logical GPIO identifiers for DAISY_FACTORY_CMD_GPIO_GET. Each maps in the
  * firmware to a board gpio_dt_spec; the level returned is the *logical* level

@@ -767,6 +767,44 @@ static uint8_t handle_bt_addr(uint8_t *payload, uint8_t *out_len) {
 #endif
 }
 
+/* Report the detail for one BLE profile (bond slot). req = [index]. Reports the
+ * bonded peer address for that slot (which host it is paired with) plus the
+ * per-slot bonded/connected/active flags. -> struct daisy_factory_bt_profile. */
+static uint8_t handle_bt_profile_get(const uint8_t *req, uint8_t req_len, uint8_t *payload,
+                                     uint8_t *out_len) {
+#if !IS_ENABLED(CONFIG_ZMK_BLE)
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 1) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    uint8_t index = req[0];
+    if (index >= ZMK_BLE_PROFILE_COUNT) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+
+    bt_addr_le_t *peer = zmk_ble_profile_address(index);
+    struct daisy_factory_bt_profile out = {
+        .index = index,
+        .addr_type = peer->type,
+    };
+    memcpy(out.addr_val, peer->a.val, sizeof(out.addr_val));
+    if (!zmk_ble_profile_is_open(index)) {
+        out.flags |= DAISY_FACTORY_BT_PROF_FLAG_BONDED;
+    }
+    if (zmk_ble_profile_is_connected(index)) {
+        out.flags |= DAISY_FACTORY_BT_PROF_FLAG_CONNECTED;
+    }
+    if (index == (uint8_t)zmk_ble_active_profile_index()) {
+        out.flags |= DAISY_FACTORY_BT_PROF_FLAG_ACTIVE;
+    }
+
+    memcpy(payload, &out, sizeof(out));
+    *out_len = sizeof(out);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
 /* Relay a host-displayed passkey to a pending passkey-entry pairing.
  * req = [passkey u32 little-endian]. Action-only. */
 static uint8_t handle_bt_passkey(const uint8_t *req, uint8_t req_len) {
@@ -984,6 +1022,10 @@ static void process_work_handler(struct k_work *work) {
     case DAISY_FACTORY_CMD_BT_PASSKEY:
         status = handle_bt_passkey(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
                                    req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_BT_PROFILE_GET:
+        status = handle_bt_profile_get(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                       req_buf[DAISY_FACTORY_OFF_LEN], payload, &payload_len);
         break;
     case DAISY_FACTORY_CMD_ENDPOINT_GET:
         status = handle_endpoint_get(payload, &payload_len);
