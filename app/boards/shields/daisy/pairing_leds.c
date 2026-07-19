@@ -69,6 +69,16 @@ static void blink_handler(struct k_work *work)
     struct k_work_delayable *dwork = k_work_delayable_from_work(work);
     struct blink_context *ctx = CONTAINER_OF(dwork, struct blink_context, work);
 
+    /* Bail out if BLE has been turned off since the blink started (e.g. the
+     * protocol switch moved to wired). Disconnecting an *unconnected* profile
+     * raises no ble_active_profile_changed event, so refresh_pairing_leds()
+     * never re-runs to stop us — this self-check is what actually halts the
+     * blink and leaves the LED dark. */
+    if (!zmk_ble_adv_enabled_get()) {
+        led_set(ctx->led_idx, false);
+        return;
+    }
+
     ctx->is_on = !ctx->is_on;
     led_set(ctx->led_idx, ctx->is_on);
     k_work_reschedule_for_queue(&blink_q, &ctx->work, K_MSEC(ctx->half_period_ms));
@@ -99,6 +109,12 @@ static void refresh_pairing_leds(void)
     stop_blink();
     for (uint32_t i = 0; i < NUM_PAIRING_LEDS; i++) {
         led_set(i, false);
+    }
+
+    /* Bluetooth off (wired mode via the protocol switch drops links and clears
+     * permit_adv): there is no pairing state to show, so leave every LED dark. */
+    if (!zmk_ble_adv_enabled_get()) {
+        return;
     }
 
     int active = zmk_ble_active_profile_index();
