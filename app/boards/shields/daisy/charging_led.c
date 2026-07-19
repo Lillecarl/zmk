@@ -8,6 +8,13 @@
 #include <zmk/events/usb_conn_state_changed.h>
 #include <zmk/usb.h>
 
+#if IS_ENABLED(CONFIG_DAISY_FACTORY)
+#include "factory_state.h"
+#else
+/* No factory interface built -> factory mode can never be active. */
+static inline bool daisy_factory_mode_active(void) { return false; }
+#endif
+
 LOG_MODULE_REGISTER(daisy_charging_led, LOG_LEVEL_INF);
 
 /*
@@ -169,12 +176,20 @@ static K_WORK_DELAYABLE_DEFINE(off_work, off_work_handler);
 
 static void charge_led_off(void)
 {
+    if (daisy_factory_mode_active()) {
+        /* Factory mode owns the LEDs -- leave them untouched. */
+        return;
+    }
     set_rgb(false, false, false);
 }
 
 /* Show the current charge status briefly, then arm the auto-off. */
 static void show_charge_indication(void)
 {
+    if (daisy_factory_mode_active()) {
+        /* Factory mode owns the LEDs -- leave them untouched. */
+        return;
+    }
 
     if (battery_full()) {
         set_rgb(true, true, true); /* white */
