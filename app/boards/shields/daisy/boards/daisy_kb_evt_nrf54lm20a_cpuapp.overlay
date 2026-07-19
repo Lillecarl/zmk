@@ -39,12 +39,12 @@
 
 #include "nrf54lm20a_partitions.dtsi"
 
-/* Reroute the shield's direct button input at the KB EVT's pairing/mode
- * switches (declared as gpio-keys on the board). */
-// &buttons_input {
-//     /delete-property/ input-gpios;
-//     input-keys = <&pairing_button &protocol_switch>;
-// };
+/* Pairing button moved to P3.10 on KB EVT (POC uses P1.13 from the shield
+ * base in daisy.dtsi). Assumes external pull-up like the POC; add
+ * GPIO_PULL_UP here if the EVT PCB lacks one. */
+&buttons_input {
+    input-gpios = <&gpio3 10 (GPIO_ACTIVE_LOW)>;
+};
 
 /* Daisy EVT matrix: KSI0..7 on P0.00..P0.07, KSO0..17 on P1.00..P1.17. */
 &matrix_input {

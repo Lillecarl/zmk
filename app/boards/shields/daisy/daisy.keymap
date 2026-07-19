@@ -30,16 +30,16 @@
 // | FN + C    | Clear BT    |
 / {
     macros {
-        // bt_next: bt_next {
-        //     compatible = "zmk,behavior-macro";
-        //     #binding-cells = <0>;
-        //     bindings = <&bt BT_NXT>;
-        // };
-        // bt_clear: bt_clear {
-        //     compatible = "zmk,behavior-macro";
-        //     #binding-cells = <0>;
-        //     bindings = <&bt BT_CLR>;
-        // };
+        bt_next: bt_next {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings = <&bt BT_NXT>;
+        };
+        bt_clear: bt_clear {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings = <&bt BT_CLR>;
+        };
 	// usb_bt_sw: usb_bt_switch {
         //     compatible = "zmk,behavior-macro";
         //     #binding-cells = <0>;
@@ -72,26 +72,27 @@
 		;
 	};
     };
-    // behaviors {
+    behaviors {
     //     led_trig: led_trigger {
     //         compatible = "zmk,behavior-led-trigger";
     //         #binding-cells = <1>; /* Accepts 1 argument (0 or 1) */
     //     };
-    //     pairing_ht: pairing_ht {
-    //         compatible = "zmk,behavior-hold-tap";
-    //         #binding-cells = <2>;
-    //         flavor = "hold-preferred";
-    //         tapping-term-ms = <1000>;
-    //         bindings = <&bt_clear>, <&bt_next>;
-    //         display-name = "Mod-Tap";
-    //     };
-    // };
+        pairing_ht: pairing_ht {
+            compatible = "zmk,behavior-hold-tap";
+            #binding-cells = <2>;
+            flavor = "hold-preferred";
+            tapping-term-ms = <1000>;
+            bindings = <&bt_clear>, <&bt_next>;
+            display-name = "Mod-Tap";
+        };
+    };
     keymap {
         compatible = "zmk,keymap";
 
         default_layer {
             display-name = "Default Layer";
             bindings = <
+                &pairing_ht 0 0
                 //&pairing_ht 0 0 &usb_bt_sw
 		// &none &none
                 // ---------------------------------------------------------------------------------------------------------
@@ -115,6 +116,7 @@
         fn_layer {
             display-name = "FN Layer";
             bindings = <
+		&trans
                 // &bootloader &trans
                 // &trans &trans
                 // ---------------------------------------------------------------------------------------------------------
@@ -138,6 +140,7 @@
         fnlock_layer {
             display-name = "FN Lock Layer";
             bindings = <
+                &pairing_ht 0 0
                 // &pairing_ht 0 0 &usb_bt_sw
 		// &none &none
                 // ---------------------------------------------------------------------------------------------------------
@@ -161,6 +164,7 @@
         fm_layer {
             display-name = "FM Layer (Temp FN unlock)";
             bindings = <
+		&trans
                 // &bootloader &trans
                 // &trans &trans
                 // ---------------------------------------------------------------------------------------------------------
