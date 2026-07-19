@@ -13,9 +13,12 @@ LOG_MODULE_REGISTER(daisy_charging_led, LOG_LEVEL_INF);
 /*
  * Charge-status RGB indicator.
  *
- *   cable unplugged        -> LED off (never on)
- *   plugged + charging     -> amber  (R + G)
- *   plugged + full/complete-> white  (R + G + B)
+ * This is a momentary plug-in acknowledgement, not a persistent charge gauge:
+ * when a cable is attached the LED shows the charge status for one second and
+ * then goes dark. It stays off the rest of the time (including while unplugged).
+ *
+ *   plug in + charging      -> amber (R + G) for 1 s, then off
+ *   plug in + full/complete -> white (R + G + B) for 1 s, then off
  *
  * The two keyboard boards wire the status RGB differently, so the color
  * output is abstracted behind set_rgb():
@@ -159,34 +162,32 @@ static bool battery_full(void)
 }
 #endif /* HAS_CHARGER */
 
-/* Re-check the (slowly changing) charge status while a cable is attached, so
- * the amber->white transition is caught -- charge completion raises no event. */
-#define POLL_INTERVAL K_SECONDS(10)
-static void poll_work_handler(struct k_work *work);
-static K_WORK_DELAYABLE_DEFINE(poll_work, poll_work_handler);
+/* How long the charge color stays lit after a cable is plugged in. */
+#define ON_DURATION K_SECONDS(1)
+static void off_work_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(off_work, off_work_handler);
 
-static void update_led(void)
+static void charge_led_off(void)
 {
-    if (!zmk_usb_is_powered()) {
-        /* Cable unplugged: the LED must never be on. */
-        set_rgb(false, false, false);
-        return;
-    }
+    set_rgb(false, false, false);
+}
+
+/* Show the current charge status briefly, then arm the auto-off. */
+static void show_charge_indication(void)
+{
 
     if (battery_full()) {
         set_rgb(true, true, true); /* white */
     } else {
         set_rgb(true, true, false); /* amber */
     }
+    k_work_reschedule(&off_work, ON_DURATION);
 }
 
-static void poll_work_handler(struct k_work *work)
+static void off_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    update_led();
-    if (zmk_usb_is_powered()) {
-        k_work_reschedule(&poll_work, POLL_INTERVAL);
-    }
+    charge_led_off();
 }
 
 static int daisy_charging_led_update_listener(const zmk_event_t *eh)
@@ -197,12 +198,14 @@ static int daisy_charging_led_update_listener(const zmk_event_t *eh)
     }
 
     LOG_INF("usb powered: %d", zmk_usb_is_powered());
-    update_led();
 
     if (zmk_usb_is_powered()) {
-        k_work_reschedule(&poll_work, POLL_INTERVAL);
+        /* Cable just plugged in: flash the charge status, then auto-off. */
+        show_charge_indication();
     } else {
-        k_work_cancel_delayable(&poll_work);
+        /* Unplugged before the timer fired: cancel it and go dark now. */
+        k_work_cancel_delayable(&off_work);
+        charge_led_off();
     }
     return 0;
 }
@@ -213,9 +216,9 @@ ZMK_SUBSCRIPTION(daisy_charging_led, zmk_usb_conn_state_changed);
 static int daisy_charging_led_init(void)
 {
     rgb_init();
-    update_led();
+    /* If a cable is already attached at boot, give the same brief flash. */
     if (zmk_usb_is_powered()) {
-        k_work_reschedule(&poll_work, POLL_INTERVAL);
+        show_charge_indication();
     }
     return 0;
 }
