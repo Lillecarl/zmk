@@ -8,6 +8,7 @@
 
 #include <zmk/ble.h>
 #include <zmk/endpoints.h>
+#include <zmk/events/ble_active_profile_changed.h>
 #include <zmk/events/usb_conn_state_changed.h>
 #include <zmk/usb.h>
 
@@ -106,6 +107,18 @@ static void apply_policy(void) {
         zmk_ble_adv_enabled_set(false);
 #endif
     }
+
+#if IS_ENABLED(CONFIG_ZMK_BLE)
+    /* Nudge the BLE-state indicators to re-evaluate. Toggling advertising while
+     * no profile is connected raises no ble_active_profile_changed on its own,
+     * so pairing_leds.c would otherwise keep its stale blink (going to wired) or
+     * miss the resumed blink (going to wireless). We reuse that event even
+     * though the active profile itself is unchanged: every subscriber re-reads
+     * state via the zmk_ble_* getters and ignores the payload, hence the NULL
+     * profile pointer. */
+    raise_zmk_ble_active_profile_changed((struct zmk_ble_active_profile_changed){
+        .index = zmk_ble_active_profile_index(), .profile = NULL});
+#endif
 }
 
 static void power_work_handler(struct k_work *work) {
