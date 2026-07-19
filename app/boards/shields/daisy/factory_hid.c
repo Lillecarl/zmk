@@ -29,6 +29,7 @@
 #include <zephyr/drivers/mfd/npm13xx.h>
 #include <zephyr/drivers/led.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/hwinfo.h>
 
 #include <zephyr/app_version.h>
 
@@ -286,6 +287,19 @@ static uint8_t handle_info(uint8_t *payload, uint8_t *out_len) {
     };
     memcpy(payload, &info, sizeof(info));
     *out_len = sizeof(info);
+    return DAISY_FACTORY_OK;
+}
+
+/* Read the SoC's unique hardware device id via the Zephyr hwinfo driver. On
+ * nRF this returns FICR->INFO.DEVICEID (8 bytes, big-endian, DEVICEID[1]
+ * first). Read-only; the bytes are burned in at manufacture and unique per
+ * chip. */
+static uint8_t handle_device_id(uint8_t *payload, uint8_t *out_len) {
+    ssize_t n = hwinfo_get_device_id(payload, DAISY_FACTORY_PAYLOAD_SIZE);
+    if (n <= 0) {
+        return DAISY_FACTORY_ERR_HW;
+    }
+    *out_len = (uint8_t)n;
     return DAISY_FACTORY_OK;
 }
 

@@ -60,6 +60,11 @@ enum daisy_factory_cmd {
     /* group 0x0: core / transport */
     DAISY_FACTORY_CMD_INFO = 0x00, /* -> struct daisy_factory_info */
     DAISY_FACTORY_CMD_PING = 0x01, /* payload echoed back verbatim */
+    /* Read the SoC's unique hardware device id (nRF FICR->INFO.DEVICEID, via
+     * the Zephyr hwinfo driver). No payload in; out: the raw id bytes (8 on
+     * nRF54), big-endian as hwinfo returns them (DEVICEID[1] first). Permanent
+     * and unique per chip; independent of any writable serial number. */
+    DAISY_FACTORY_CMD_DEVICE_ID = 0x02,
 
     /* group 0x1: battery (read-only) */
     DAISY_FACTORY_CMD_BATTERY_TEMP = 0x11,    /* -> i16 hundredths of degC, LE */

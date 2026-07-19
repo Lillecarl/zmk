@@ -5,12 +5,13 @@ if SHIELD_DAISY_BASE
 
 config DAISY_FACTORY
     bool "Daisy factory-test HID interface"
+    select HWINFO
     help
       Compile the vendor-defined factory-test HID interface (factory_hid.c),
       which lets the `aster` factory tool talk to the keyboard over USB with no
       custom OS driver. Enabled by the `daisy-factory` snippet, which also adds
       the required `factory_hid` devicetree node. Leave off for production
-      firmware.
+      firmware. Selects HWINFO for the device-id (FICR) read command.
 
 config ZMK_KEYBOARD_NAME
     # TODO: Full name (Current limit is 16 - BT_DEVICE_NAME_MAX)
