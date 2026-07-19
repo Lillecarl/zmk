@@ -6,6 +6,13 @@
 #include <zmk/event_manager.h>
 #include <zmk/events/ble_active_profile_changed.h>
 
+#if IS_ENABLED(CONFIG_DAISY_FACTORY)
+#include "factory_state.h"
+#else
+/* No factory interface built -> factory mode can never be active. */
+static inline bool daisy_factory_mode_active(void) { return false; }
+#endif
+
 LOG_MODULE_REGISTER(daisy_pairing_leds, LOG_LEVEL_INF);
 
 /*
@@ -52,6 +59,12 @@ static struct k_work_q blink_q;
 
 static void led_set(uint32_t idx, bool on)
 {
+    if (daisy_factory_mode_active()) {
+        /* Factory mode owns the LEDs -- don't touch the hardware. The blink
+         * timer keeps ticking (state tracked in blink_ctx), so indication
+         * resumes cleanly once factory mode exits. */
+        return;
+    }
     led_set_brightness(pairing_leds, idx, on ? PAIRING_DUTY : 0);
 }
 
