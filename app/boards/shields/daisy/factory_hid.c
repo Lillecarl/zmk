@@ -913,6 +913,9 @@ static void process_work_handler(struct k_work *work) {
         memcpy(payload, &req_buf[DAISY_FACTORY_OFF_PAYLOAD], payload_len);
         status = DAISY_FACTORY_OK;
         break;
+    case DAISY_FACTORY_CMD_DEVICE_ID:
+        status = handle_device_id(payload, &payload_len);
+        break;
     case DAISY_FACTORY_CMD_BATTERY_TEMP:
         status = handle_battery_temp(payload, &payload_len);
         break;
