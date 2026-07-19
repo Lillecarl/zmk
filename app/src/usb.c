@@ -94,6 +94,17 @@ static void usbd_msg_cb(struct usbd_context *const usbd_ctx, const struct usbd_m
         is_configured = false;
         break;
     case USBD_MSG_VBUS_REMOVED:
+        /* Disable the device stack, mirroring usbd_enable() on VBUS_READY
+         * (upstream samples do the same). This dequeues pending transfers
+         * with -ECONNABORTED — releasing anything blocked in a synchronous
+         * hid_device_submit_report() / CDC notification send — and flips
+         * every class's iface_ready(false) so later sends fail fast instead
+         * of enqueueing into a dead controller. Without it a pending HID IN
+         * transfer wedges the system workqueue until replug, and the
+         * controller state is stale on replug (no re-enumeration). */
+        if (usbd_disable(usbd_ctx)) {
+            LOG_ERR("Failed to disable USB on VBUS removed");
+        }
         conn_state = ZMK_USB_CONN_NONE;
         is_configured = false;
         break;
