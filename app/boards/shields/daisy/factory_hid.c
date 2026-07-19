@@ -38,6 +38,8 @@
 #include <zmk/hid.h>
 #include <dt-bindings/zmk/hid_usage_pages.h>
 
+#include "factory_state.h"
+
 #if IS_ENABLED(CONFIG_ZMK_BLE)
 #include <zmk/ble.h>
 #include <zephyr/bluetooth/bluetooth.h>
@@ -199,6 +201,10 @@ static bool hid_ready;
 static bool factory_mode;
 
 bool zmk_sleep_inhibited(void) { return factory_mode; }
+
+/* Shared with the board LED modules so they stop driving the LEDs while a
+ * factory test run has (exclusive) control of them. See factory_state.h. */
+bool daisy_factory_mode_active(void) { return factory_mode; }
 
 /*
  * QMK-compatible raw HID report descriptor: a single vendor application
