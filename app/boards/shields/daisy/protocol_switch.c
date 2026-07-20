@@ -12,6 +12,13 @@
 #include <zmk/events/usb_conn_state_changed.h>
 #include <zmk/usb.h>
 
+#if IS_ENABLED(CONFIG_DAISY_FACTORY)
+#include "factory_state.h"
+#else
+/* No factory interface built -> factory mode can never be active. */
+static inline bool daisy_factory_mode_active(void) { return false; }
+#endif
+
 LOG_MODULE_REGISTER(daisy_protocol_switch, LOG_LEVEL_INF);
 
 /*
@@ -93,6 +100,11 @@ static void enter_low_power(void) {
 }
 
 static void apply_policy(void) {
+    if (daisy_factory_mode_active()) {
+        /* Factory mode does pairing and gpio testing -- don't react on switch */
+        return;
+    }
+
     if (current_mode == MODE_WIRELESS) {
         LOG_INF("mode WIRELESS: BLE enabled, USB only until BLE connects");
 #if IS_ENABLED(CONFIG_ZMK_BLE)
