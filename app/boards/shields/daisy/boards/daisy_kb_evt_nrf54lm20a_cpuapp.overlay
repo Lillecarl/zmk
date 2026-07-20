@@ -46,6 +46,16 @@
     input-gpios = <&gpio3 10 (GPIO_ACTIVE_LOW)>;
 };
 
+/* P3.10 is owned by &buttons_input (input-gpio-direct). The board's gpio-keys
+ * pairing_button node would double-drive the same pin's interrupt config
+ * (EDGE_BOTH/DISABLE vs LEVEL_ACTIVE/DISABLE, last writer wins) and can leave
+ * it disabled or GPIO_DISCONNECTED (its PM suspend hook) -> button dead until
+ * reboot. Nothing consumes its INPUT_KEY_0 events. factory_hid.c only needs
+ * the node's GPIO spec, which still resolves when disabled. */
+&pairing_button {
+    status = "disabled";
+};
+
 /* Daisy EVT matrix: KSI0..7 on P0.00..P0.07, KSO0..17 on P1.00..P1.17. */
 &matrix_input {
     col-gpios
