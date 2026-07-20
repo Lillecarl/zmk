@@ -99,6 +99,13 @@ enum daisy_factory_cmd {
      * jump). Acks first, then reboots shortly after so the response reaches the
      * host. No payload. */
     DAISY_FACTORY_CMD_REBOOT = 0x53,
+    /* Return the keyboard to a factory-default state, then reboot. Clears every
+     * BLE bond (and selects profile 0), reverts all ZMK Studio keymap/layout
+     * modifications to the built-in defaults, exits factory mode, and finally
+     * warm-reboots. Persisted changes are written before the reboot. Acks
+     * first, then reboots shortly after so the response reaches the host (same
+     * pattern as REBOOT). No payload. */
+    DAISY_FACTORY_CMD_FACTORY_RESET = 0x54,
 
     /* group 0x4: GPIO / straps (read-only) */
     DAISY_FACTORY_CMD_GPIO_GET = 0x40, /* in: [gpio_id u8]; out: [level u8 0/1] */

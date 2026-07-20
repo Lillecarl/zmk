@@ -36,6 +36,7 @@
 #include <zmk/activity.h>
 #include <zmk/endpoints.h>
 #include <zmk/hid.h>
+#include <zmk/keymap.h>
 #include <dt-bindings/zmk/hid_usage_pages.h>
 
 #include "factory_state.h"
@@ -543,6 +544,40 @@ static uint8_t handle_reboot(void) {
     return DAISY_FACTORY_OK;
 }
 
+/* Return the keyboard to a factory-default state, then reboot. Action-only.
+ * Clears every BLE bond (and selects profile 0), reverts all ZMK Studio
+ * keymap/layout modifications to the firmware defaults, exits factory mode, and
+ * warm-reboots. Each step persists its own state, so the deferred reboot (same
+ * ack-first pattern as handle_reboot) only reboots after the writes are done.
+ * Runs on the system workqueue, the context the ZMK BLE/keymap APIs expect. */
+static uint8_t handle_factory_reset(void) {
+#if IS_ENABLED(CONFIG_ZMK_BLE)
+    /* Unpair every profile (persisted immediately). This already selects
+     * profile 0; do it explicitly too so the "back to slot 1" intent is local
+     * to this handler and survives any change to clear_all_bonds. */
+    zmk_ble_clear_all_bonds();
+    zmk_ble_prof_select(0);
+#endif
+
+    /* Revert ZMK Studio keymap/layout changes to the firmware defaults -- the
+     * same reset the Studio "restore stock settings" flow performs. Returns
+     * -ENOTSUP when keymap settings storage isn't built in (nothing was
+     * persisted, so there is nothing to clear); that is not a reset failure. */
+    int err = zmk_keymap_reset_settings();
+    if (err < 0 && err != -ENOTSUP) {
+        LOG_ERR("factory reset: keymap settings reset failed: %d", err);
+        return DAISY_FACTORY_ERR_HW;
+    }
+
+    /* Leave factory mode so normal sleep behavior resumes. The reboot below
+     * clears it too (RAM-only), but make the intent explicit. */
+    factory_mode = false;
+
+    LOG_INF("factory reset: state cleared, rebooting");
+    k_work_schedule(&reboot_work, K_MSEC(REBOOT_DELAY_MS));
+    return DAISY_FACTORY_OK;
+}
+
 /* Set a pairing LED to a PWM duty cycle. req = [index, percent]. Action-only:
  * no response payload. */
 static uint8_t handle_led_set_pwm(const uint8_t *req, uint8_t req_len) {
@@ -1019,6 +1054,9 @@ static void process_work_handler(struct k_work *work) {
         break;
     case DAISY_FACTORY_CMD_REBOOT:
         status = handle_reboot();
+        break;
+    case DAISY_FACTORY_CMD_FACTORY_RESET:
+        status = handle_factory_reset();
         break;
     case DAISY_FACTORY_CMD_BT_CLEAR_BONDS:
         status = handle_bt_clear_bonds();
