@@ -95,6 +95,10 @@ enum daisy_factory_cmd {
      * CDC-ACM "Recovery" device for mcumgr). Acks first, then reboots shortly
      * after so the response reaches the host. No payload. */
     DAISY_FACTORY_CMD_BOOTLOADER_JUMP = 0x52,
+    /* Warm-reboot back into the application (a plain reset, not a bootloader
+     * jump). Acks first, then reboots shortly after so the response reaches the
+     * host. No payload. */
+    DAISY_FACTORY_CMD_REBOOT = 0x53,
 
     /* group 0x4: GPIO / straps (read-only) */
     DAISY_FACTORY_CMD_GPIO_GET = 0x40, /* in: [gpio_id u8]; out: [level u8 0/1] */

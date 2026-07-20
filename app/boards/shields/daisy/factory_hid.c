@@ -525,6 +525,24 @@ static uint8_t handle_bootloader_jump(void) {
 #endif
 }
 
+/* Rebooting tears down USB, so it can't run inline with the response. This
+ * fires shortly after the ack, giving the Input report time to reach the host.
+ * Unlike the bootloader jump, no boot mode is stamped: it is a plain warm
+ * reboot straight back into the application. */
+static void reboot_work_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+    sys_reboot(SYS_REBOOT_WARM);
+}
+static K_WORK_DELAYABLE_DEFINE(reboot_work, reboot_work_handler);
+#define REBOOT_DELAY_MS 250
+
+/* Warm-reboot back into the application. Action-only; the reboot is deferred so
+ * the ack reaches the host first. */
+static uint8_t handle_reboot(void) {
+    k_work_schedule(&reboot_work, K_MSEC(REBOOT_DELAY_MS));
+    return DAISY_FACTORY_OK;
+}
+
 /* Set a pairing LED to a PWM duty cycle. req = [index, percent]. Action-only:
  * no response payload. */
 static uint8_t handle_led_set_pwm(const uint8_t *req, uint8_t req_len) {
@@ -998,6 +1016,9 @@ static void process_work_handler(struct k_work *work) {
         break;
     case DAISY_FACTORY_CMD_BOOTLOADER_JUMP:
         status = handle_bootloader_jump();
+        break;
+    case DAISY_FACTORY_CMD_REBOOT:
+        status = handle_reboot();
         break;
     case DAISY_FACTORY_CMD_BT_CLEAR_BONDS:
         status = handle_bt_clear_bonds();
