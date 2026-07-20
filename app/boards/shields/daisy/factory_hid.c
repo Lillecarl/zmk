@@ -557,6 +557,11 @@ static uint8_t handle_factory_reset(void) {
      * to this handler and survives any change to clear_all_bonds. */
     zmk_ble_clear_all_bonds();
     zmk_ble_prof_select(0);
+    /* prof_select debounces the active-profile save by
+     * CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE (60 s); the reboot below fires long
+     * before that, so force the save now or the previously-selected profile is
+     * restored on the next boot (observed: reset ended up on slot 2). */
+    zmk_ble_save_profile_immediate();
 #endif
 
     /* Revert ZMK Studio keymap/layout changes to the firmware defaults -- the
