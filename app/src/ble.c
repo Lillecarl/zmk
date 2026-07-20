@@ -324,6 +324,17 @@ int zmk_ble_prof_select(uint8_t index) {
     return 0;
 };
 
+int zmk_ble_save_profile_immediate(void) {
+#if IS_ENABLED(CONFIG_SETTINGS)
+    // Cancel any pending debounced save (its value would match) and persist the
+    // active profile now, so a reboot immediately after does not lose it.
+    k_work_cancel_delayable(&ble_save_work);
+    return settings_save_one("ble/active_profile", &active_profile, sizeof(active_profile));
+#else
+    return 0;
+#endif
+}
+
 int zmk_ble_prof_next(void) {
     LOG_DBG("");
     return zmk_ble_prof_select((active_profile + 1) % ZMK_BLE_PROFILE_COUNT);

@@ -29,6 +29,11 @@ void zmk_ble_clear_bonds(void);
 int zmk_ble_prof_next(void);
 int zmk_ble_prof_prev(void);
 int zmk_ble_prof_select(uint8_t index);
+/* Persist the active profile index immediately, bypassing the normal
+ * CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE. For callers that reboot right after
+ * selecting a profile (e.g. the factory reset), where the debounced save would
+ * otherwise never run before the reboot. */
+int zmk_ble_save_profile_immediate(void);
 void zmk_ble_clear_all_bonds(void);
 int zmk_ble_prof_disconnect(uint8_t index);
 
