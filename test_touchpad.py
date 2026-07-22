@@ -639,7 +639,7 @@ def phase_enum(rep, want_bus, aster):
     tp = None
     if want_bus == BUS_USB:
         usb = usb_sysfs_info()
-        if not rep.check("USB device 32ac:0034 present", usb is not None,
+        if not rep.check(f"USB device {VID:04x}:{PID:04x} present", usb is not None,
                          fail_detail="not enumerated — cable? known replug bug "
                          "(needs reset, see daisy.md)"):
             return None
@@ -1177,6 +1177,11 @@ def main():
                     "bonded+connected; use bond_dongle.py --laptop --prep)")
     ap.add_argument("--ble-only", action="store_true",
                     help="skip USB phases, test only Bluetooth")
+    ap.add_argument("--dongle", action="store_true",
+                    help="target the USB-A Bluetooth dongle's touchpad "
+                    "passthrough interface (32ac:0039) instead of the "
+                    "keyboard's own USB. The BLE leg terminates at the "
+                    "dongle, so this is USB-only.")
     ap.add_argument("--quick", action="store_true",
                     help="enumeration + feature reports only (no interaction)")
     ap.add_argument("--quick-input", action="store_true",
@@ -1210,6 +1215,14 @@ def main():
     args = ap.parse_args()
     if not os.path.exists(args.aster):
         args.aster = None
+
+    if args.dongle:
+        global PID
+        PID = 0x0039  # Framework USB-A Bluetooth Dongle
+        if args.ble or args.ble_only or args.watch_ble:
+            sys.exit("--dongle is USB-only: the BLE leg terminates at the "
+                     "dongle, the host only sees its USB interfaces")
+        args.aster = None  # aster talks to the keyboard, not the dongle
 
     if args.gain:
         return gain_mode(args)
