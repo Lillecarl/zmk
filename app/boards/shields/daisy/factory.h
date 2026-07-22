@@ -106,6 +106,14 @@ enum daisy_factory_cmd {
      * first, then reboots shortly after so the response reaches the host (same
      * pattern as REBOOT). No payload. */
     DAISY_FACTORY_CMD_FACTORY_RESET = 0x54,
+    /* Enter standby (ZMK deep sleep / SoC System OFF): suspend every device's
+     * PM hook, then power the SoC off. Acks first, then enters standby
+     * shortly after so the response reaches the host; the keyboard drops off
+     * USB/BLE. There is deliberately no exit command -- in System OFF the
+     * factory interface is gone; a configured wake source (key press) wakes
+     * it, which is a full reboot. UNSUPPORTED without CONFIG_ZMK_SLEEP. No
+     * payload. */
+    DAISY_FACTORY_CMD_STANDBY_ENTER = 0x55,
 
     /* group 0x4: GPIO / straps (read-only) */
     DAISY_FACTORY_CMD_GPIO_GET = 0x40, /* in: [gpio_id u8]; out: [level u8 0/1] */

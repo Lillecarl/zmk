@@ -52,6 +52,11 @@
 #include <zephyr/sys/reboot.h>
 #endif
 
+#if IS_ENABLED(CONFIG_ZMK_SLEEP)
+#include <zephyr/sys/poweroff.h>
+#include <zmk/pm.h>
+#endif
+
 #include "factory.h"
 
 #include <zephyr/logging/log.h>
@@ -583,6 +588,35 @@ static uint8_t handle_factory_reset(void) {
     return DAISY_FACTORY_OK;
 }
 
+#if IS_ENABLED(CONFIG_ZMK_SLEEP)
+/* Standby entry runs deferred (same ack-first pattern as handle_reboot) so
+ * the ack reaches the host before the SoC powers off. Mirrors the sleep path
+ * in activity.c: suspend every device's PM hook, then System OFF. Wake is a
+ * configured wake source (key press) and comes back as a full reboot. */
+static void standby_work_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+    LOG_INF("factory standby: entering System OFF (deep sleep)");
+    if (zmk_pm_suspend_devices() < 0) {
+        LOG_ERR("factory standby: failed to suspend all devices, staying awake");
+        zmk_pm_resume_devices();
+        return;
+    }
+    sys_poweroff();
+}
+static K_WORK_DELAYABLE_DEFINE(standby_work, standby_work_handler);
+#endif
+
+/* Enter standby (ZMK deep sleep / System OFF). Action-only; deferred so the
+ * ack reaches the host first. */
+static uint8_t handle_standby_enter(void) {
+#if !IS_ENABLED(CONFIG_ZMK_SLEEP)
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    k_work_schedule(&standby_work, K_MSEC(REBOOT_DELAY_MS));
+    return DAISY_FACTORY_OK;
+#endif
+}
+
 /* Set a pairing LED to a PWM duty cycle. req = [index, percent]. Action-only:
  * no response payload. */
 static uint8_t handle_led_set_pwm(const uint8_t *req, uint8_t req_len) {
@@ -1062,6 +1096,9 @@ static void process_work_handler(struct k_work *work) {
         break;
     case DAISY_FACTORY_CMD_FACTORY_RESET:
         status = handle_factory_reset();
+        break;
+    case DAISY_FACTORY_CMD_STANDBY_ENTER:
+        status = handle_standby_enter();
         break;
     case DAISY_FACTORY_CMD_BT_CLEAR_BONDS:
         status = handle_bt_clear_bonds();
