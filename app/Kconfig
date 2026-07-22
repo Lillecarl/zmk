@@ -22,6 +22,12 @@ config ZMK_KEYBOARD_NAME
     string "Keyboard Name"
 
 config USB_DEVICE_PRODUCT
+    # Give it a prompt (like USB_DEVICE_MANUFACTURER below) so it stays settable
+    # from a .conf under the usb-next stack. Zephyr's prompted definition is
+    # gated behind USB_DEVICE_STACK, which is =n for USB_DEVICE_STACK_NEXT; with
+    # only a bare `default` here the symbol is unsettable and a CONFIG_ override
+    # is silently ignored (it falls back to ZMK_KEYBOARD_NAME).
+    string "USB product name"
     default ZMK_KEYBOARD_NAME
 
 config BT_DEVICE_NAME
