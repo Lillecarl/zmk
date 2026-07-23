@@ -43,7 +43,7 @@ LOG_MODULE_REGISTER(daisy_pairing_leds, LOG_LEVEL_INF);
 
 #define PAIRING_DUTY      50
 #define NUM_PAIRING_LEDS  DT_CHILD_NUM(PAIRING_LEDS_NODE)
-#define FAST_BLINK_MS     500
+#define FAST_BLINK_MS     250
 #define SLOW_BLINK_MS     1500
 
 static const struct device *pairing_leds = DEVICE_DT_GET(PAIRING_LEDS_NODE);
