@@ -202,6 +202,16 @@ static int zmk_usb_hid_send_report(const uint8_t *report, size_t len) {
         return -ENODEV;
     }
 
+    if (zmk_usb_is_suspended()) {
+        /* Host is asleep: the IN endpoint isn't polled, so submitting would
+         * only tie up the TX buffer (its done callback can't fire until
+         * resume) and then time out. Ask the host to wake instead and drop
+         * this report; the current HID state is re-sent once the bus resumes
+         * (and the key release, if any, follows as its own report). */
+        zmk_usb_wakeup_request();
+        return 0;
+    }
+
     if (len > sizeof(hid_tx_buf)) {
         LOG_ERR("HID report too large: %zu > %zu", len, sizeof(hid_tx_buf));
         return -EINVAL;

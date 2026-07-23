@@ -66,6 +66,25 @@ enum zmk_usb_conn_state zmk_usb_get_conn_state(void) { return conn_state; }
 
 bool zmk_usb_is_hid_ready(void) { return conn_state == ZMK_USB_CONN_HID && is_configured; }
 
+int zmk_usb_wakeup_request(void) {
+    /* Only meaningful while the host has the bus suspended; otherwise there is
+     * nothing to resume. usbd_wakeup_request() additionally requires the host
+     * to have armed remote wakeup (SET_FEATURE DEVICE_REMOTE_WAKEUP) and the
+     * controller to support it (udc caps.rwup) — it validates both and returns
+     * an error (no signaling) otherwise, so this is always safe to call from a
+     * HID send path. On success the controller drives resume (K-state)
+     * signaling, waking a sleeping computer. */
+    if (!is_suspended) {
+        return 0;
+    }
+
+    int err = usbd_wakeup_request(&zmk_usbd);
+    if (err) {
+        LOG_WRN("USB remote wakeup request failed: %d", err);
+    }
+    return err;
+}
+
 struct usbd_context *zmk_usb_get_usbd(void) { return &zmk_usbd; }
 
 static void usbd_msg_cb(struct usbd_context *const usbd_ctx, const struct usbd_msg *const msg) {
