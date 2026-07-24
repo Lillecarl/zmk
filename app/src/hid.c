@@ -18,6 +18,9 @@ static struct zmk_hid_keyboard_report keyboard_report = {
 static struct zmk_hid_consumer_report consumer_report = {.report_id = ZMK_HID_REPORT_ID_CONSUMER,
                                                          .body = {.keys = {0}}};
 
+static struct zmk_hid_system_report system_report = {.report_id = ZMK_HID_REPORT_ID_SYSTEM,
+                                                     .body = {.controls = 0}};
+
 #if IS_ENABLED(CONFIG_ZMK_USB_BOOT)
 
 static zmk_hid_boot_report_t boot_report = {.modifiers = 0, ._reserved = 0, .keys = {0}};
@@ -341,12 +344,50 @@ bool zmk_hid_consumer_is_pressed(zmk_key_t key) {
     return false;
 }
 
+// Map a Generic Desktop System Control usage ID to its bit in the system report.
+// Only System Microphone Mute (0xA9) is currently carried in the report.
+static inline uint8_t system_usage_bit(zmk_key_t code) {
+    switch (code) {
+    case HID_USAGE_GD_SYSTEM_MICROPHONE_MUTE:
+        return ZMK_HID_SYSTEM_MICROPHONE_MUTE_BIT;
+    default:
+        return 0;
+    }
+}
+
+int zmk_hid_system_press(zmk_key_t code) {
+    uint8_t bit = system_usage_bit(code);
+    if (!bit) {
+        return -ENOTSUP;
+    }
+    system_report.body.controls |= bit;
+    return 0;
+}
+
+int zmk_hid_system_release(zmk_key_t code) {
+    uint8_t bit = system_usage_bit(code);
+    if (!bit) {
+        return -ENOTSUP;
+    }
+    system_report.body.controls &= ~bit;
+    return 0;
+}
+
+void zmk_hid_system_clear(void) { system_report.body.controls = 0; }
+
+bool zmk_hid_system_is_pressed(zmk_key_t code) {
+    uint8_t bit = system_usage_bit(code);
+    return bit && (system_report.body.controls & bit);
+}
+
 int zmk_hid_press(uint32_t usage) {
     switch (ZMK_HID_USAGE_PAGE(usage)) {
     case HID_USAGE_KEY:
         return zmk_hid_keyboard_press(ZMK_HID_USAGE_ID(usage));
     case HID_USAGE_CONSUMER:
         return zmk_hid_consumer_press(ZMK_HID_USAGE_ID(usage));
+    case HID_USAGE_GD:
+        return zmk_hid_system_press(ZMK_HID_USAGE_ID(usage));
     }
     return -EINVAL;
 }
@@ -357,6 +398,8 @@ int zmk_hid_release(uint32_t usage) {
         return zmk_hid_keyboard_release(ZMK_HID_USAGE_ID(usage));
     case HID_USAGE_CONSUMER:
         return zmk_hid_consumer_release(ZMK_HID_USAGE_ID(usage));
+    case HID_USAGE_GD:
+        return zmk_hid_system_release(ZMK_HID_USAGE_ID(usage));
     }
     return -EINVAL;
 }
@@ -367,6 +410,8 @@ bool zmk_hid_is_pressed(uint32_t usage) {
         return zmk_hid_keyboard_is_pressed(ZMK_HID_USAGE_ID(usage));
     case HID_USAGE_CONSUMER:
         return zmk_hid_consumer_is_pressed(ZMK_HID_USAGE_ID(usage));
+    case HID_USAGE_GD:
+        return zmk_hid_system_is_pressed(ZMK_HID_USAGE_ID(usage));
     }
     return false;
 }
@@ -471,6 +516,8 @@ void zmk_hid_mouse_clear(void) {
 struct zmk_hid_keyboard_report *zmk_hid_get_keyboard_report(void) { return &keyboard_report; }
 
 struct zmk_hid_consumer_report *zmk_hid_get_consumer_report(void) { return &consumer_report; }
+
+struct zmk_hid_system_report *zmk_hid_get_system_report(void) { return &system_report; }
 
 #if IS_ENABLED(CONFIG_ZMK_POINTING)
 

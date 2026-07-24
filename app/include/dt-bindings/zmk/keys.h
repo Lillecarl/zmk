@@ -21,6 +21,11 @@
 #define SYSTEM_WAKE_UP (ZMK_HID_USAGE(HID_USAGE_GD, HID_USAGE_GD_SYSTEM_WAKE_UP))
 #define SYS_WAKE (SYSTEM_WAKE_UP)
 
+/* System Microphone Mute (HUTRR110) */
+#define SYSTEM_MICROPHONE_MUTE                                                                      \
+    (ZMK_HID_USAGE(HID_USAGE_GD, HID_USAGE_GD_SYSTEM_MICROPHONE_MUTE))
+#define SYS_MIC_MUTE (SYSTEM_MICROPHONE_MUTE)
+
 /* Keyboard a and A */
 #define A (ZMK_HID_USAGE(HID_USAGE_KEY, HID_USAGE_KEY_KEYBOARD_A))
 
