@@ -16,3 +16,5 @@ zephyr_library_sources(charging_led.c)
 zephyr_library_sources(pairing_leds.c)
 zephyr_library_sources(protocol_switch.c)
 zephyr_library_sources(pwm_init.c)
+# DEBUG (sleep/wake investigation) — remove sleep_debug.c when done.
+zephyr_library_sources(sleep_debug.c)
