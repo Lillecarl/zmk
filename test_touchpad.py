@@ -1169,6 +1169,118 @@ def run_transport(rep, args, bus, tag, record_fh):
     return tp
 
 
+def lag_probe(args):
+    """Snapshot the touchpad-lag state. Run this WHILE the pad feels laggy,
+    BEFORE opening tapview/evtest/anything else.
+
+    Probe order matters: sysfs and /proc reads don't touch the device, but
+    opening hidraw (done last) triggers hid_hw_open -> USB runtime resume ->
+    hid-multitouch rewriting the mode features — the same mechanism that makes
+    "open tapview" un-stick the pad — so it can destroy the state being
+    observed. If the pad becomes snappy the moment this script reaches step 3,
+    that is itself the answer.
+    """
+    devs = [d for d in find_daisy_hid(BUS_USB) if d.kind == "touchpad"]
+    if not devs:
+        sys.exit("no touchpad HID device on USB (dongle plugged in? --dongle?)")
+    tp = devs[0]
+    print(f"touchpad: {tp.hid_id} hidraw={tp.hidraw} "
+          f"events={[p for p, _ in tp.event_nodes]}")
+
+    print("\n-- 1. USB runtime PM (sysfs, non-invasive) --")
+    usb = usb_sysfs_info()
+    if usb:
+        for attr in ("power/control", "power/runtime_status",
+                     "power/autosuspend_delay_ms", "power/wakeup"):
+            try:
+                with open(os.path.join(usb["syspath"], attr)) as f:
+                    print(f"  {attr}: {f.read().strip()}")
+            except OSError as e:
+                print(f"  {attr}: unreadable ({e})")
+    else:
+        print("  USB device not found in sysfs?!")
+
+    print("\n-- 2. processes holding the input nodes (non-invasive) --")
+    targets = {p for p, _ in tp.event_nodes}
+    if tp.hidraw:
+        targets.add(tp.hidraw)
+    holders = {t: [] for t in targets}
+    for pid in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            comm = open(f"/proc/{pid}/comm").read().strip()
+            for fd in os.listdir(f"/proc/{pid}/fd"):
+                try:
+                    tgt = os.readlink(f"/proc/{pid}/fd/{fd}")
+                except OSError:
+                    continue
+                if tgt in holders:
+                    holders[tgt].append(f"{comm}({pid})")
+        except OSError:
+            continue
+    for t in sorted(holders):
+        who = ", ".join(holders[t]) if holders[t] else "NOBODY"
+        print(f"  {t}: {who}")
+    tp_ev = [p for p, n in tp.event_nodes if "Touchpad" in n]
+    if tp_ev and not holders.get(tp_ev[0]):
+        print(C.c(C.Y, "  !! nothing holds the Touchpad event node — libinput "
+                       "hasn't claimed it; hid-multitouch may be idle/suspended"))
+
+    print("\n-- 3. hidraw sample, 3 s (opens hidraw — may un-stick the pad!) --")
+    print("   keep a finger moving on the pad...")
+    counts, scan, arrivals = {}, [], []
+    t0 = time.monotonic()
+    with open(tp.hidraw, "rb", buffering=0) as f:
+        os.set_blocking(f.fileno(), False)
+        while time.monotonic() - t0 < 3.0:
+            r, _, _ = select.select([f], [], [], 0.2)
+            if not r:
+                continue
+            buf = f.read(64)
+            if not buf:
+                continue
+            counts[buf[0]] = counts.get(buf[0], 0) + 1
+            if buf[0] == PTP_ID and len(buf) >= 1 + PTP_PAYLOAD:
+                p = parse_ptp(buf[1:])
+                if p:
+                    scan.append(p["scan_time"])
+                    arrivals.append(time.monotonic())
+    dur = time.monotonic() - t0
+    for rid, n in sorted(counts.items()):
+        print(f"  report id 0x{rid:02x}: {n} frames, {n / dur:.1f} Hz")
+    if len(scan) > 2:
+        deltas = [(b - a) & 0xFFFF for a, b in zip(scan, scan[1:])]
+        med = statistics.median(deltas) * SCAN_TIME_UNIT_S * 1000
+        print(f"  PTP scan-time median delta: {med:.1f} ms "
+              f"({1000 / med:.0f} Hz at the pad itself)")
+    if len(arrivals) > 2:
+        # Arrival shape: uniform-slow vs bursty tells apart a steady drain
+        # bottleneck (median ~= p95) from link starvation delivering queued
+        # frames in clumps (tiny median, huge p95).
+        adel = sorted((b - a) * 1000 for a, b in zip(arrivals, arrivals[1:]))
+        med = statistics.median(adel)
+        p95 = adel[int(len(adel) * 0.95)]
+        burst = sum(1 for d in adel if d < med / 2)
+        print(f"  arrival deltas: median {med:.1f} ms, p95 {p95:.1f} ms, "
+              f"max {adel[-1]:.1f} ms")
+        if p95 > 4 * med:
+            print(C.c(C.Y, f"  !! BURSTY delivery ({burst} tight pairs): frames "
+                           "queue upstream and arrive in clumps -> BLE link "
+                           "starvation (kb-side TX or radio contention)"))
+        else:
+            print("  delivery is uniform -> steady drain bottleneck, not bursts")
+    if not counts:
+        print("  no frames at all — pad silent or interface suspended")
+
+    print("\n-- verdict hints --")
+    print("  id 0x04 @ ~130 Hz  -> healthy (or step 3 just un-stuck it)")
+    print("  id 0x04 @ ~20 Hz   -> pad in high-latency scan (suspend/latency chain)")
+    print("  id 0x01 (mouse)    -> pad fell back to mouse mode (input-mode lost)")
+    print("  runtime_status=suspended + NOBODY on event node -> autosuspend chain")
+    print("  now open tapview while watching the dongle serial log for a")
+    print("  usbd_set_report_cb id=3/5/7 burst (= host rewriting modes)")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1203,6 +1315,11 @@ def main():
                     help="accel profile for --gain (flat isolates delta "
                     "processing; adaptive includes velocity estimation + "
                     "accel curve, i.e. the real desktop feel)")
+    ap.add_argument("--lag-probe", action="store_true",
+                    help="snapshot the lag state (run WHILE laggy, before "
+                    "opening tapview): USB runtime PM, input-node holders, "
+                    "then a 3s hidraw sample — in that order, least-invasive "
+                    "first")
     ap.add_argument("--watch", action="store_true",
                     help="live parsed dump of the touchpad hidraw stream")
     ap.add_argument("--watch-ble", action="store_true",
@@ -1223,6 +1340,11 @@ def main():
             sys.exit("--dongle is USB-only: the BLE leg terminates at the "
                      "dongle, the host only sees its USB interfaces")
         args.aster = None  # aster talks to the keyboard, not the dongle
+
+    if args.lag_probe:
+        if os.geteuid() != 0 and not args.no_sudo and sys.stdin.isatty():
+            os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
+        return lag_probe(args)
 
     if args.gain:
         return gain_mode(args)
