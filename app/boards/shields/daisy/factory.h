@@ -172,6 +172,38 @@ enum daisy_factory_cmd {
      * Meant for end-to-end report-routing tests with an invisible key
      * (e.g. F24 = 0x73); the host really receives a keystroke. */
     DAISY_FACTORY_CMD_KEY_INJECT = 0x80,
+
+    /* group 0x9: touchpad */
+    /* Set the touchpad power state. payload:
+     * [state u8 (daisy_factory_touchpad_power)]. ON is normal operation.
+     * SLEEP is the pad's "modern standby" (HID-I2C SET_POWER sleep, ~7 uA):
+     * it stops streaming but still detects a touch; only ON resumes
+     * reporting. OFF is SLEEP plus the passthrough driver suspended (its
+     * data-ready interrupt can't fire), so no reports flow even if the pad
+     * wakes itself on a touch. The PCT1036's deeper register-flow suspend is
+     * a no-op in HID-I2C mode, so modern standby is the lowest reachable
+     * state. Idempotent, RAM-only: a keyboard reboot returns the pad to ON
+     * (the driver sends SET_POWER on at init). UNSUPPORTED on targets
+     * without a touchpad; HW on an I2C failure. */
+    DAISY_FACTORY_CMD_TOUCHPAD_POWER_SET = 0x90,
+    /* Read a raw 8-bit touchpad register (PCT1036 vendor register space,
+     * outside the HID protocol). payload in: [reg u8]; out: [value u8].
+     * Debug/bring-up aid. NOTE: in HID-I2C mode the pad ACKs these but the
+     * vendor register space does not appear to be wired up (reads return 0,
+     * writes change nothing). UNSUPPORTED without a touchpad; HW on I2C
+     * NAK. */
+    DAISY_FACTORY_CMD_TOUCHPAD_REG_READ = 0x91,
+    /* Write a raw 8-bit touchpad register. payload: [reg u8, value u8].
+     * Debug/bring-up aid; same HID-I2C-mode caveat as TOUCHPAD_REG_READ. */
+    DAISY_FACTORY_CMD_TOUCHPAD_REG_WRITE = 0x92,
+};
+
+/* Touchpad power states for DAISY_FACTORY_CMD_TOUCHPAD_POWER_SET, ordered so
+ * that 0/1 read as a plain off/on toggle. */
+enum daisy_factory_touchpad_power {
+    DAISY_FACTORY_TOUCHPAD_OFF = 0,   /* standby + passthrough quiesced */
+    DAISY_FACTORY_TOUCHPAD_ON = 1,    /* run: full operation */
+    DAISY_FACTORY_TOUCHPAD_SLEEP = 2, /* modern standby: touch-detect only */
 };
 
 /* HID transport selector for the ENDPOINT_* commands. Values match ZMK's

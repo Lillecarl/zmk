@@ -164,6 +164,18 @@ static const struct gpio_dt_spec rgb_gpio[] = {
 };
 #endif
 
+/* Touchpad (PCT1036 behind the hid-touchpad passthrough driver). Power-state
+ * control needs the driver's PM hook (CONFIG_PM_DEVICE) to gate its data-ready
+ * interrupt; without it the command reports UNSUPPORTED. The node exists but is
+ * disabled on targets without a pad (dev kits), hence the status check. */
+#define HAS_TOUCHPAD                                                                                \
+    (DT_NODE_HAS_STATUS(DT_NODELABEL(touchpad), okay) && IS_ENABLED(CONFIG_PM_DEVICE))
+#if HAS_TOUCHPAD
+#include <hid_touchpad.h>
+#include "touchpad_power.h"
+static const struct device *const touchpad = DEVICE_DT_GET(DT_NODELABEL(touchpad));
+#endif
+
 /* Caps lock LED (plain GPIO, gpio-leds child on the board). Normally driven by
  * the HID-indicator listener in capslock.c; the factory command pokes the pin
  * directly, so a caps-lock change from the host will overwrite it. */
@@ -978,6 +990,63 @@ static uint8_t handle_key_inject(const uint8_t *req, uint8_t req_len) {
     return DAISY_FACTORY_OK;
 }
 
+/* Set the touchpad power state. req = [state (daisy_factory_touchpad_power)].
+ * Action-only, idempotent. Delegates to daisy_touchpad_power_set() in
+ * touchpad_power.c (shared with the automatic host-follow logic; the state
+ * values match by construction). While factory mode is active the host-follow
+ * logic stands down, so a state set here sticks for the whole test run. */
+static uint8_t handle_touchpad_power_set(const uint8_t *req, uint8_t req_len) {
+#if !HAS_TOUCHPAD
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 1) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    if (req[0] > DAISY_FACTORY_TOUCHPAD_SLEEP) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+    if (daisy_touchpad_power_set((enum daisy_touchpad_power)req[0]) < 0) {
+        return DAISY_FACTORY_ERR_HW;
+    }
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* Read a raw 8-bit touchpad register. req = [reg]; payload out = [value].
+ * Debug/bring-up aid for the PCT1036 vendor register space. */
+static uint8_t handle_touchpad_reg_read(const uint8_t *req, uint8_t req_len, uint8_t *payload,
+                                        uint8_t *out_len) {
+#if !HAS_TOUCHPAD
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 1) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    uint8_t val;
+    if (hid_touchpad_reg_read(touchpad, req[0], &val) < 0) {
+        return DAISY_FACTORY_ERR_HW;
+    }
+    payload[0] = val;
+    *out_len = 1;
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* Write a raw 8-bit touchpad register. req = [reg, value]. Action-only. */
+static uint8_t handle_touchpad_reg_write(const uint8_t *req, uint8_t req_len) {
+#if !HAS_TOUCHPAD
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 2) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    if (hid_touchpad_reg_write(touchpad, req[0], req[1]) < 0) {
+        return DAISY_FACTORY_ERR_HW;
+    }
+    return DAISY_FACTORY_OK;
+#endif
+}
+
 /* Read a named GPIO's logical level. req = [gpio_id]; payload out = [level].
  * The level is gpio_pin_get_dt (active-low aware): 1 = asserted. */
 static uint8_t handle_gpio_get(const uint8_t *req, uint8_t req_len, uint8_t *payload,
@@ -1144,6 +1213,18 @@ static void process_work_handler(struct k_work *work) {
     case DAISY_FACTORY_CMD_KEY_INJECT:
         status = handle_key_inject(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
                                    req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_TOUCHPAD_POWER_SET:
+        status = handle_touchpad_power_set(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                           req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_TOUCHPAD_REG_READ:
+        status = handle_touchpad_reg_read(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                          req_buf[DAISY_FACTORY_OFF_LEN], payload, &payload_len);
+        break;
+    case DAISY_FACTORY_CMD_TOUCHPAD_REG_WRITE:
+        status = handle_touchpad_reg_write(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                           req_buf[DAISY_FACTORY_OFF_LEN]);
         break;
     case DAISY_FACTORY_CMD_GPIO_GET:
         status = handle_gpio_get(&req_buf[DAISY_FACTORY_OFF_PAYLOAD], req_buf[DAISY_FACTORY_OFF_LEN],
