@@ -65,6 +65,14 @@ enum daisy_factory_cmd {
      * nRF54), big-endian as hwinfo returns them (DEVICEID[1] first). Permanent
      * and unique per chip; independent of any writable serial number. */
     DAISY_FACTORY_CMD_DEVICE_ID = 0x02,
+    /* Read (and clear) the crash breadcrumb from the previous boot: when the
+     * firmware dies on a fatal error (hard fault, oops, failed assert) it
+     * records where in __noinit RAM and warm-reboots; that record survives
+     * the reboot. payload in: [clear u8 (0=peek, 1=clear after read)];
+     * out: struct daisy_factory_crash_info. `valid` is 0 (and the rest
+     * zeroed) when the previous shutdown was clean. Resolve `pc`/`lr`
+     * against the matching zmk.elf with addr2line. */
+    DAISY_FACTORY_CMD_CRASH_INFO = 0x03,
 
     /* group 0x1: battery (read-only) */
     DAISY_FACTORY_CMD_BATTERY_TEMP = 0x11,    /* -> i16 hundredths of degC, LE */
@@ -297,6 +305,20 @@ enum daisy_factory_device_type {
     DAISY_FACTORY_DEVICE_KEYBOARD = 0,
     DAISY_FACTORY_DEVICE_DONGLE = 1,
 };
+
+/* CRASH_INFO response payload. `file` and `thread` are NUL-padded but may
+ * fill their fields without a terminator. `line`/`file` are only set when
+ * the fatal error was a failed assert; `pc`/`lr` only when an exception
+ * frame was available. */
+struct daisy_factory_crash_info {
+    uint8_t valid;    /* 1 = a crash record follows, 0 = clean boot */
+    uint8_t reason;   /* k_fatal_error_reason */
+    uint16_t line;    /* assert line number, LE */
+    uint32_t pc;      /* faulting program counter, LE */
+    uint32_t lr;      /* link register, LE */
+    char file[9];     /* assert file name, truncated (fills the 27-byte payload) */
+    char thread[6];   /* thread that died, truncated */
+} __attribute__((packed));
 
 /* CORE_INFO response payload. */
 struct daisy_factory_info {

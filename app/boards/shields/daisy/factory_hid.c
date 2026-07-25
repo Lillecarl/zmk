@@ -40,6 +40,7 @@
 #include <dt-bindings/zmk/hid_usage_pages.h>
 
 #include "factory_state.h"
+#include "crash_info.h"
 
 #if IS_ENABLED(CONFIG_ZMK_BLE)
 #include <zmk/ble.h>
@@ -324,6 +325,31 @@ static uint8_t handle_device_id(uint8_t *payload, uint8_t *out_len) {
         return DAISY_FACTORY_ERR_HW;
     }
     *out_len = (uint8_t)n;
+    return DAISY_FACTORY_OK;
+}
+
+/* Read (and optionally clear) the crash breadcrumb from the previous boot.
+ * req = [clear]; -> struct daisy_factory_crash_info (valid=0 on clean boot). */
+static uint8_t handle_crash_info(const uint8_t *req, uint8_t req_len, uint8_t *payload,
+                                 uint8_t *out_len) {
+    struct daisy_crash_info info;
+    struct daisy_factory_crash_info out = {0};
+
+    if (daisy_crash_info_get(&info)) {
+        out.valid = 1;
+        out.reason = (uint8_t)info.reason;
+        out.line = (uint16_t)info.line;
+        out.pc = info.pc;
+        out.lr = info.lr;
+        memcpy(out.file, info.file, MIN(sizeof(out.file), sizeof(info.file)));
+        memcpy(out.thread, info.thread, MIN(sizeof(out.thread), sizeof(info.thread)));
+        if (req_len >= 1 && req[0] != 0) {
+            daisy_crash_info_clear();
+        }
+    }
+
+    memcpy(payload, &out, sizeof(out));
+    *out_len = sizeof(out);
     return DAISY_FACTORY_OK;
 }
 
@@ -1120,6 +1146,10 @@ static void process_work_handler(struct k_work *work) {
         break;
     case DAISY_FACTORY_CMD_DEVICE_ID:
         status = handle_device_id(payload, &payload_len);
+        break;
+    case DAISY_FACTORY_CMD_CRASH_INFO:
+        status = handle_crash_info(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                   req_buf[DAISY_FACTORY_OFF_LEN], payload, &payload_len);
         break;
     case DAISY_FACTORY_CMD_BATTERY_TEMP:
         status = handle_battery_temp(payload, &payload_len);
