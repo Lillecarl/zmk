@@ -102,8 +102,8 @@ static int get_report_cb(const struct device *dev, const uint8_t type, const uin
             memcpy(buf, &report->body, body_size);
             return body_size;
         }
-        case ZMK_HID_REPORT_ID_SYSTEM: {
-            struct zmk_hid_system_report *report = zmk_hid_get_system_report();
+        case ZMK_HID_REPORT_ID_TELEPHONY: {
+            struct zmk_hid_telephony_report *report = zmk_hid_get_telephony_report();
             size_t body_size = sizeof(report->body);
             if (len < body_size) {
                 return -EINVAL;
@@ -250,14 +250,14 @@ int zmk_usb_hid_send_consumer_report(void) {
     return zmk_usb_hid_send_report((uint8_t *)report, sizeof(*report));
 }
 
-int zmk_usb_hid_send_system_report(void) {
+int zmk_usb_hid_send_telephony_report(void) {
 #if IS_ENABLED(CONFIG_ZMK_USB_BOOT)
     if (hid_protocol == 0) {
         return -ENOTSUP;
     }
 #endif /* IS_ENABLED(CONFIG_ZMK_USB_BOOT) */
 
-    struct zmk_hid_system_report *report = zmk_hid_get_system_report();
+    struct zmk_hid_telephony_report *report = zmk_hid_get_telephony_report();
     return zmk_usb_hid_send_report((uint8_t *)report, sizeof(*report));
 }
 

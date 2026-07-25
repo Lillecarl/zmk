@@ -218,8 +218,8 @@ config ZMK_BLE_MOUSE_REPORT_QUEUE_SIZE
     int "Max number of mouse HID reports to queue for sending over BLE"
     default 20
 
-config ZMK_BLE_SYSTEM_REPORT_QUEUE_SIZE
-    int "Max number of system control HID reports to queue for sending over BLE"
+config ZMK_BLE_TELEPHONY_REPORT_QUEUE_SIZE
+    int "Max number of telephony HID reports to queue for sending over BLE"
     default 5
 
 config ZMK_BLE_CLEAR_BONDS_ON_START

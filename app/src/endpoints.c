@@ -247,14 +247,14 @@ static int send_consumer_report(void) {
     return -ENOTSUP;
 }
 
-static int send_system_report(void) {
+static int send_telephony_report(void) {
     switch (current_instance.transport) {
     case ZMK_TRANSPORT_NONE:
         return 0;
 
     case ZMK_TRANSPORT_USB: {
 #if IS_ENABLED(CONFIG_ZMK_USB)
-        int err = zmk_usb_hid_send_system_report();
+        int err = zmk_usb_hid_send_telephony_report();
         if (err) {
             LOG_ERR("FAILED TO SEND OVER USB: %d", err);
         }
@@ -267,8 +267,8 @@ static int send_system_report(void) {
 
     case ZMK_TRANSPORT_BLE: {
 #if IS_ENABLED(CONFIG_ZMK_BLE)
-        struct zmk_hid_system_report *system_report = zmk_hid_get_system_report();
-        int err = zmk_hog_send_system_report(&system_report->body);
+        struct zmk_hid_telephony_report *telephony_report = zmk_hid_get_telephony_report();
+        int err = zmk_hog_send_telephony_report(&telephony_report->body);
         if (err) {
             LOG_ERR("FAILED TO SEND OVER HOG: %d", err);
         }
@@ -293,8 +293,8 @@ int zmk_endpoint_send_report(uint16_t usage_page) {
     case HID_USAGE_CONSUMER:
         return send_consumer_report();
 
-    case HID_USAGE_GD:
-        return send_system_report();
+    case HID_USAGE_TELEPHONY:
+        return send_telephony_report();
     }
 
     LOG_ERR("Unsupported usage page %d", usage_page);
@@ -511,14 +511,14 @@ static int zmk_endpoints_init(void) {
 void zmk_endpoint_clear_reports(void) {
     zmk_hid_keyboard_clear();
     zmk_hid_consumer_clear();
-    zmk_hid_system_clear();
+    zmk_hid_telephony_clear();
 #if IS_ENABLED(CONFIG_ZMK_POINTING)
     zmk_hid_mouse_clear();
 #endif // IS_ENABLED(CONFIG_ZMK_POINTING)
 
     zmk_endpoint_send_report(HID_USAGE_KEY);
     zmk_endpoint_send_report(HID_USAGE_CONSUMER);
-    zmk_endpoint_send_report(HID_USAGE_GD);
+    zmk_endpoint_send_report(HID_USAGE_TELEPHONY);
 }
 
 static void update_current_endpoint(void) {
