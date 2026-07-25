@@ -75,7 +75,7 @@
 #define ZMK_HID_REPORT_ID_LEDS 0x01
 #define ZMK_HID_REPORT_ID_CONSUMER 0x02
 #define ZMK_HID_REPORT_ID_MOUSE 0x03
-#define ZMK_HID_REPORT_ID_SYSTEM 0x04
+#define ZMK_HID_REPORT_ID_TELEPHONY 0x04
 
 #ifndef HID_ITEM_TAG_PUSH
 #define HID_ITEM_TAG_PUSH 0xA
@@ -181,13 +181,16 @@ static const uint8_t zmk_hid_report_desc[] = {
     HID_INPUT(ZMK_HID_MAIN_VAL_DATA | ZMK_HID_MAIN_VAL_ARRAY | ZMK_HID_MAIN_VAL_ABS),
     HID_END_COLLECTION,
 
-    // System Control collection carrying HUTRR110 System Microphone Mute (GD 0xA9).
+    // Telephony Headset collection carrying Phone Mute (Telephony 0x0B, usage 0x2F).
+    // HUTRR110 System Microphone Mute (GD 0xA9) works on Linux but is ignored by
+    // Windows; Windows/Teams/Zoom act on the Telephony page instead. Linux maps
+    // Phone Mute to KEY_MICMUTE too, so this single usage covers both.
     // Single on/off-control (OOC) bit plus 7 bits of constant padding.
-    HID_USAGE_PAGE(HID_USAGE_GD),
-    HID_USAGE(HID_USAGE_GD_SYSTEM_CONTROL),
+    HID_USAGE_PAGE(HID_USAGE_TELEPHONY),
+    HID_USAGE(HID_USAGE_TELEPHONY_HEADSET),
     HID_COLLECTION(HID_COLLECTION_APPLICATION),
-    HID_REPORT_ID(ZMK_HID_REPORT_ID_SYSTEM),
-    HID_USAGE(HID_USAGE_GD_SYSTEM_MICROPHONE_MUTE),
+    HID_REPORT_ID(ZMK_HID_REPORT_ID_TELEPHONY),
+    HID_USAGE(HID_USAGE_TELEPHONY_PHONE_MUTE),
     HID_LOGICAL_MIN8(0x00),
     HID_LOGICAL_MAX8(0x01),
     HID_REPORT_SIZE(0x01),
@@ -324,16 +327,16 @@ struct zmk_hid_consumer_report {
     struct zmk_hid_consumer_report_body body;
 } __packed;
 
-struct zmk_hid_system_report_body {
-    uint8_t controls; // bit 0: System Microphone Mute; bits 1-7 reserved
+struct zmk_hid_telephony_report_body {
+    uint8_t controls; // bit 0: Phone Mute; bits 1-7 reserved
 } __packed;
 
-struct zmk_hid_system_report {
+struct zmk_hid_telephony_report {
     uint8_t report_id;
-    struct zmk_hid_system_report_body body;
+    struct zmk_hid_telephony_report_body body;
 } __packed;
 
-#define ZMK_HID_SYSTEM_MICROPHONE_MUTE_BIT BIT(0)
+#define ZMK_HID_TELEPHONY_PHONE_MUTE_BIT BIT(0)
 
 #if IS_ENABLED(CONFIG_ZMK_POINTING)
 struct zmk_hid_mouse_report_body {
@@ -387,10 +390,10 @@ int zmk_hid_consumer_release(zmk_key_t key);
 void zmk_hid_consumer_clear(void);
 bool zmk_hid_consumer_is_pressed(zmk_key_t key);
 
-int zmk_hid_system_press(zmk_key_t key);
-int zmk_hid_system_release(zmk_key_t key);
-void zmk_hid_system_clear(void);
-bool zmk_hid_system_is_pressed(zmk_key_t key);
+int zmk_hid_telephony_press(zmk_key_t key);
+int zmk_hid_telephony_release(zmk_key_t key);
+void zmk_hid_telephony_clear(void);
+bool zmk_hid_telephony_is_pressed(zmk_key_t key);
 
 int zmk_hid_press(uint32_t usage);
 int zmk_hid_release(uint32_t usage);
@@ -411,7 +414,7 @@ void zmk_hid_mouse_clear(void);
 
 struct zmk_hid_keyboard_report *zmk_hid_get_keyboard_report(void);
 struct zmk_hid_consumer_report *zmk_hid_get_consumer_report(void);
-struct zmk_hid_system_report *zmk_hid_get_system_report(void);
+struct zmk_hid_telephony_report *zmk_hid_get_telephony_report(void);
 
 #if IS_ENABLED(CONFIG_ZMK_USB_BOOT)
 zmk_hid_boot_report_t *zmk_hid_get_boot_report();
