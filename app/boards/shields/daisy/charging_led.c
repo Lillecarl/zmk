@@ -126,9 +126,10 @@ static void rgb_init(void) {}
 #endif
 
 /*
- * "Charging" vs "fully charged" comes straight from the nPM1300 charger.
- * The board's zmk,battery chosen node is disabled, so zmk_battery_state_of_charge()
- * is always 0 here -- read the charger BCHGCHARGESTATUS register instead.
+ * "Charging" vs "fully charged" is a charge state, not a level, so read it
+ * straight from the nPM1300 charger's BCHGCHARGESTATUS register rather than
+ * from zmk_battery_state_of_charge() (which now reports a voltage-estimated
+ * SoC percentage via the zmk,battery chosen node, a different thing).
  */
 #define HAS_CHARGER DT_NODE_EXISTS(DT_NODELABEL(npm1300_charger))
 #if HAS_CHARGER
