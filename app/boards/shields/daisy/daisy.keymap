@@ -28,7 +28,30 @@
 // | FN + U    | USB Output  |
 // | FN + B    | BLE Output  |
 // | FN + C    | Clear BT    |
+// | Win held + E+T chord | Enable Touchpad  |
+// | Win held + D+T chord | Disable Touchpad |
 / {
+    combos {
+        compatible = "zmk,combos";
+        // Hold Win, then tap E+T together to enable the touchpad, D+T to
+        // disable it. Win itself can't be a combo member (a combo's window
+        // starts at its first key, and Win is naturally held long before the
+        // letters), so the chord is just the two letters and &tp_pwr checks
+        // that a GUI modifier is held -- retyping the letters when it isn't.
+        // Key positions: 32 = E, 34 = T, 46 = D.
+        combo_tp_enable {
+            timeout-ms = <75>;
+            require-prior-idle-ms = <125>;
+            key-positions = <32 34>;
+            bindings = <&tp_pwr 1>;
+        };
+        combo_tp_disable {
+            timeout-ms = <75>;
+            require-prior-idle-ms = <125>;
+            key-positions = <46 34>;
+            bindings = <&tp_pwr 0>;
+        };
+    };
     macros {
         bt_next: bt_next {
             compatible = "zmk,behavior-macro";
@@ -77,6 +100,10 @@
     //         compatible = "zmk,behavior-led-trigger";
     //         #binding-cells = <1>; /* Accepts 1 argument (0 or 1) */
     //     };
+        tp_pwr: touchpad_power {
+            compatible = "zmk,behavior-touchpad-power";
+            #binding-cells = <1>; /* 1 = enable, 0 = disable */
+        };
         pairing_ht: pairing_ht {
             compatible = "zmk,behavior-hold-tap";
             #binding-cells = <2>;
