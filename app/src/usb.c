@@ -54,6 +54,7 @@ USBD_DEVICE_DEFINE(zmk_usbd, DEVICE_DT_GET(DT_NODELABEL(zephyr_udc0)),
 
 static enum zmk_usb_conn_state conn_state = ZMK_USB_CONN_NONE;
 static bool is_configured;
+static bool is_suspended;
 
 static void raise_usb_status_changed_event(struct k_work *_work) {
     raise_zmk_usb_conn_state_changed(
@@ -65,6 +66,8 @@ K_WORK_DEFINE(usb_status_notifier_work, raise_usb_status_changed_event);
 enum zmk_usb_conn_state zmk_usb_get_conn_state(void) { return conn_state; }
 
 bool zmk_usb_is_hid_ready(void) { return conn_state == ZMK_USB_CONN_HID && is_configured; }
+
+bool zmk_usb_is_suspended(void) { return is_suspended; }
 
 int zmk_usb_wakeup_request(void) {
     /* Only meaningful while the host has the bus suspended; otherwise there is
@@ -103,6 +106,10 @@ static void usbd_msg_cb(struct usbd_context *const usbd_ctx, const struct usbd_m
         break;
     case USBD_MSG_SUSPEND:
     case USBD_MSG_RESUME:
+        /* conn_state is unchanged across suspend/resume, but is_suspended
+         * flips and the notifier below still fires, so listeners that care
+         * about host sleep (zmk_usb_is_suspended) get both edges. */
+        is_suspended = msg->type == USBD_MSG_SUSPEND;
         conn_state = is_configured ? ZMK_USB_CONN_HID : ZMK_USB_CONN_POWERED;
         break;
     case USBD_MSG_RESET:
@@ -111,6 +118,7 @@ static void usbd_msg_cb(struct usbd_context *const usbd_ctx, const struct usbd_m
 #endif
         conn_state = ZMK_USB_CONN_POWERED;
         is_configured = false;
+        is_suspended = false;
         break;
     case USBD_MSG_VBUS_REMOVED:
         /* Disable the device stack, mirroring usbd_enable() on VBUS_READY
@@ -126,6 +134,7 @@ static void usbd_msg_cb(struct usbd_context *const usbd_ctx, const struct usbd_m
         }
         conn_state = ZMK_USB_CONN_NONE;
         is_configured = false;
+        is_suspended = false;
         break;
     case USBD_MSG_VBUS_READY:
         if (usbd_can_detect_vbus(usbd_ctx)) {

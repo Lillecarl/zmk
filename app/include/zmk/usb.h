@@ -22,6 +22,12 @@ static inline bool zmk_usb_is_powered(void) {
 }
 bool zmk_usb_is_hid_ready(void);
 
+/* True while the host has put the bus in USB suspend (host asleep). The conn
+ * state stays ZMK_USB_CONN_HID across suspend/resume, but the
+ * zmk_usb_conn_state_changed event still fires on both edges so listeners can
+ * re-check this. */
+bool zmk_usb_is_suspended(void);
+
 /* Request USB remote wakeup: ask a suspended host to resume the bus so an input
  * report (keypress, pointer motion) can wake a sleeping computer. A no-op
  * returning 0 when the bus isn't suspended; when it is, forwards to
