@@ -38,6 +38,8 @@ bool is_usb_power_present(void) {
 #endif /* IS_ENABLED(CONFIG_USB_DEVICE_STACK) || IS_ENABLED(CONFIG_USB_DEVICE_STACK_NEXT) */
 }
 
+__attribute__((weak)) bool zmk_sleep_inhibited(void) { return false; }
+
 static enum zmk_activity_state activity_state;
 
 static uint32_t activity_last_uptime;
@@ -75,7 +77,7 @@ void activity_work_handler(struct k_work *work) {
     int32_t current = k_uptime_get();
     int32_t inactive_time = current - activity_last_uptime;
 #if IS_ENABLED(CONFIG_ZMK_SLEEP)
-    if (inactive_time > MAX_SLEEP_MS && !is_usb_power_present()) {
+    if (inactive_time > MAX_SLEEP_MS && !is_usb_power_present() && !zmk_sleep_inhibited()) {
         // Put devices in suspend power mode before sleeping
         set_state(ZMK_ACTIVITY_SLEEP);
 
