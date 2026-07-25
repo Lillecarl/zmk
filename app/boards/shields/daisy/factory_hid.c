@@ -177,6 +177,25 @@ static const struct gpio_dt_spec rgb_gpio[] = {
 static const struct device *const touchpad = DEVICE_DT_GET(DT_NODELABEL(touchpad));
 #endif
 
+/* PERT (group 0xA): raw-PHY packet-error-rate testing via the controller's
+ * Direct Test Mode. Requires CONFIG_BT_CTLR_DTM_HCI=y (daisy.conf) on top of
+ * BLE. The DTM commands go through the Bluetooth host as HCI commands (the
+ * flow BT_CTLR_DTM_HCI exists for, and the same pattern the dongle firmware
+ * uses) -- NOT via the controller-private ll_test_* API: calling that
+ * directly hard-faults the firmware even with every link down, advertising
+ * off, or the whole stack bt_disable()d (verified on EVT hardware
+ * 2026-07-25). Over HCI the command executes in the host's TX-thread
+ * context with proper command flow control. */
+#define HAS_PERT (IS_ENABLED(CONFIG_BT_CTLR_DTM_HCI) && IS_ENABLED(CONFIG_ZMK_BLE))
+#if HAS_PERT
+#include <zephyr/bluetooth/hci.h>
+#include <zephyr/bluetooth/hci_types.h>
+#include <zephyr/drivers/clock_control/nrf_clock_control.h>
+#include <nrfx_clock.h>
+#include <hal/nrf_clock.h>
+#define PERT_MAX_CHANNEL 39
+#endif
+
 /* Caps lock LED (plain GPIO, gpio-leds child on the board). Normally driven by
  * the HID-indicator listener in capslock.c; the factory command pokes the pin
  * directly, so a caps-lock change from the host will overwrite it. */
@@ -308,7 +327,9 @@ static uint8_t handle_info(uint8_t *payload, uint8_t *out_len) {
         .fw_major = APP_VERSION_MAJOR,
         .fw_minor = APP_VERSION_MINOR,
         .fw_patch = APP_PATCHLEVEL,
-        .capabilities = 0,
+        .capabilities = IS_ENABLED(CONFIG_BT_CTLR_DTM_HCI) && IS_ENABLED(CONFIG_ZMK_BLE)
+                            ? DAISY_FACTORY_CAP_PERT
+                            : 0,
     };
     memcpy(payload, &info, sizeof(info));
     *out_len = sizeof(info);
@@ -1123,6 +1144,257 @@ static uint8_t handle_gpio_get(const uint8_t *req, uint8_t req_len, uint8_t *pay
     return DAISY_FACTORY_OK;
 }
 
+#if HAS_PERT
+/* Validate the [chan, phy] prefix every PERT start command carries.
+ * ll_test_tx/rx index tables by chan and phy with NO bounds check of their
+ * own, so out-of-range values must be rejected here. */
+static uint8_t pert_check_chan_phy(uint8_t chan, uint8_t phy) {
+    if (chan > PERT_MAX_CHANNEL) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+    if (phy != DAISY_FACTORY_PERT_PHY_1M && phy != DAISY_FACTORY_PERT_PHY_2M) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+    return DAISY_FACTORY_OK;
+}
+
+/* Pre-warm the HFXO before a DTM start. The controller's DTM init requests
+ * the HF clock through the generic onoff manager (lll_hfclock_on_wait) and
+ * hard-asserts when the ready notification doesn't arrive within a few ms;
+ * on nRF54LM20A that notification never comes when the XO has to be started
+ * from cold in that path (found via the crash breadcrumb: UDF at
+ * lll_test.c:508, the LL_ASSERT after lll_hfclock_on_wait). Normal BLE never
+ * hits this because the LL uses the z_nrf_clock_bt_ctlr_hf_* fast path
+ * between events. Request the XO through that same fast path and wait until
+ * it reports high accuracy: the DTM init's generic request then takes the
+ * driver's synchronous already-started branch (generic_hfclk_start in
+ * clock_control_nrf.c checks "BT user holds it AND it runs at high
+ * accuracy") and needs no notification at all. The controller's TEST_END
+ * releases the BT-user flag again; re-warming before every start keeps a
+ * channel sweep safe, and the post-test reboot cleans up whatever remains. */
+static struct k_sem pert_hfxo_sem;
+static struct onoff_client pert_hfxo_cli;
+static bool pert_hfxo_granted;
+
+static void pert_hfxo_ready(struct onoff_manager *mgr, struct onoff_client *cli, uint32_t state,
+                            int res) {
+    ARG_UNUSED(mgr);
+    ARG_UNUSED(cli);
+    ARG_UNUSED(state);
+    ARG_UNUSED(res);
+    k_sem_give(&pert_hfxo_sem);
+}
+
+static uint8_t pert_hfxo_prewarm(void) {
+    nrf_clock_hfclk_t type = NRF_CLOCK_HFCLK_LOW_ACCURACY;
+
+    if (pert_hfxo_granted) {
+        return DAISY_FACTORY_OK;
+    }
+
+    /* Step 1: physically start the XO via the BT fast path, so the generic
+     * driver's start op below takes its synchronous already-started branch
+     * (no dependence on the start-notification IRQ). */
+    z_nrf_clock_bt_ctlr_hf_request();
+    for (int i = 0; i < 100; i++) {
+        (void)nrfx_clock_is_running(NRF_CLOCK_DOMAIN_HFCLK, &type);
+        if (type == NRF_CLOCK_HFCLK_HIGH_ACCURACY) {
+            break;
+        }
+        k_msleep(1);
+    }
+    if (type != NRF_CLOCK_HFCLK_HIGH_ACCURACY) {
+        LOG_ERR("pert: HFXO did not reach high accuracy");
+        return DAISY_FACTORY_ERR_HW;
+    }
+
+#if defined(NRF54LM20A_XXAA)
+    /* MLTPAN-39: on nRF54LM20A the radio's PLL must be started explicitly or
+     * TX produces no usable RF (the state machine runs, nothing decodable on
+     * air). Same workaround the radio_test sample applies after its clock
+     * init; nothing in the split controller or the clock driver does it. */
+    nrf_clock_task_trigger(NRF_CLOCK, NRF_CLOCK_TASK_PLLSTART);
+#endif
+
+    /* Step 2: take (and hold) a generic onoff grant on the HF service, so
+     * the controller's own request inside the DTM start finds the service
+     * ON with a nonzero count and is notified synchronously. If the manager
+     * sits in ONOFF_STATE_ERROR (a previously failed transition poisons it:
+     * every request returns an error until a reset), reset it and retry --
+     * this is the failure the breadcrumb kept pointing at (UDF on the
+     * LL_ASSERT after lll_hfclock_on_wait, lll_test.c:508). Held until the
+     * post-test reboot. */
+    struct onoff_manager *mgr = z_nrf_clock_control_get_onoff(CLOCK_CONTROL_NRF_SUBSYS_HF);
+    k_sem_init(&pert_hfxo_sem, 0, 1);
+    for (int attempt = 0; attempt < 2; attempt++) {
+        sys_notify_init_callback(&pert_hfxo_cli.notify, pert_hfxo_ready);
+        int err = onoff_request(mgr, &pert_hfxo_cli);
+        if (err >= 0) {
+            if (k_sem_take(&pert_hfxo_sem, K_MSEC(100)) == 0) {
+                pert_hfxo_granted = true;
+                LOG_INF("pert: HFXO running, generic grant held");
+                return DAISY_FACTORY_OK;
+            }
+            LOG_ERR("pert: HF clock grant not signalled");
+            return DAISY_FACTORY_ERR_HW;
+        }
+        LOG_WRN("pert: HF onoff request failed (%d), resetting the service", err);
+        sys_notify_init_callback(&pert_hfxo_cli.notify, pert_hfxo_ready);
+        err = onoff_reset(mgr, &pert_hfxo_cli);
+        if (err < 0) {
+            LOG_ERR("pert: HF onoff reset failed: %d", err);
+            return DAISY_FACTORY_ERR_HW;
+        }
+        (void)k_sem_take(&pert_hfxo_sem, K_MSEC(100));
+    }
+    LOG_ERR("pert: HF clock service unusable");
+    return DAISY_FACTORY_ERR_HW;
+}
+
+/* Run one HCI command against the local controller through the Bluetooth
+ * host. Blocks until the command completes (fine on the sysworkq in a
+ * factory context; the dongle firmware does the same from its main thread).
+ * Returns a factory status code; on success *rsp (when requested) holds the
+ * command-complete parameters and must be net_buf_unref'd by the caller. */
+static uint8_t pert_hci_cmd(uint16_t opcode, const void *params, size_t params_len,
+                            struct net_buf **rsp) {
+    struct net_buf *buf = bt_hci_cmd_alloc(K_FOREVER);
+    if (buf == NULL) {
+        return DAISY_FACTORY_ERR_HW;
+    }
+    if (params_len > 0) {
+        net_buf_add_mem(buf, params, params_len);
+    }
+    int err = bt_hci_cmd_send_sync(opcode, buf, rsp);
+    if (err) {
+        LOG_ERR("pert: HCI cmd 0x%04x failed: %d", opcode, err);
+        return DAISY_FACTORY_ERR_HW;
+    }
+    return DAISY_FACTORY_OK;
+}
+#endif
+
+/* Quiesce the BLE link layer for DTM: disconnect every profile and stop
+ * advertising (the host stack itself stays up -- the DTM commands travel
+ * through it as HCI commands). Action-only. The disconnects complete
+ * asynchronously; the host polls BT_STATUS until connected_mask == 0 and
+ * ADV_ENABLED clears. Recovery after the test run is a REBOOT. */
+static uint8_t handle_pert_quiesce(void) {
+#if !HAS_PERT
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    zmk_ble_adv_enabled_set(false);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* Start DTM transmit. req = [chan, phy, len, pattern, tx_power?]; transmits
+ * continuously until PERT_END. Action-only.
+ *
+ * Uses LE_TX_TEST_V4 rather than the enhanced command: the enhanced handler
+ * hardcodes POWER_MAX_SET (+8 dBm on nRF54LM20A), a TXPOWER value nothing
+ * else on this board exercises; V4 carries an explicit tx_power. Default is
+ * 0 dBm, matching the product's operating power. */
+static uint8_t handle_pert_tx_start(const uint8_t *req, uint8_t req_len) {
+#if !HAS_PERT
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 4) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    uint8_t status = pert_check_chan_phy(req[0], req[1]);
+    if (status != DAISY_FACTORY_OK) {
+        return status;
+    }
+    /* PRBS15's lookup table is stubbed in the split controller; values past
+     * 01010101 are undefined in the HCI encoding. */
+    if (req[3] == DAISY_FACTORY_PERT_PAT_PRBS15 || req[3] > DAISY_FACTORY_PERT_PAT_01010101) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+    int8_t tx_power = (req_len >= 5) ? (int8_t)req[4] : 0;
+    status = pert_hfxo_prewarm();
+    if (status != DAISY_FACTORY_OK) {
+        return status;
+    }
+    /* V4 params: fixed struct + ant_ids[switch_pattern_len] (empty here) +
+     * trailing tx_power byte. */
+    struct {
+        struct bt_hci_cp_le_tx_test_v4 cp;
+        struct bt_hci_cp_le_tx_test_v4_tx_power power;
+    } __packed cp = {
+        .cp = {
+            .tx_ch = req[0],
+            .test_data_len = req[2],
+            .pkt_payload = req[3],
+            .phy = req[1],
+            .cte_len = BT_HCI_LE_TEST_CTE_DISABLED,
+            .cte_type = BT_HCI_LE_TEST_CTE_TYPE_ANY,
+            .switch_pattern_len = BT_HCI_LE_TEST_SWITCH_PATTERN_LEN_ANY,
+        },
+        .power = {.tx_power = tx_power},
+    };
+    uint8_t status2 = pert_hci_cmd(BT_HCI_OP_LE_TX_TEST_V4, &cp, sizeof(cp), NULL);
+    if (status2 != DAISY_FACTORY_OK) {
+        return status2;
+    }
+    LOG_INF("pert: TX started (chan %u, phy %u, len %u, pattern %u, %d dBm)", req[0], req[1],
+            req[2], req[3], tx_power);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* Start DTM receive. req = [chan, phy]; counts packets until PERT_END.
+ * Action-only. */
+static uint8_t handle_pert_rx_start(const uint8_t *req, uint8_t req_len) {
+#if !HAS_PERT
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 2) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    uint8_t status = pert_check_chan_phy(req[0], req[1]);
+    if (status != DAISY_FACTORY_OK) {
+        return status;
+    }
+    status = pert_hfxo_prewarm();
+    if (status != DAISY_FACTORY_OK) {
+        return status;
+    }
+    struct bt_hci_cp_le_enh_rx_test cp = {
+        .rx_ch = req[0],
+        .phy = req[1],
+        .mod_index = BT_HCI_LE_MOD_INDEX_STANDARD,
+    };
+    uint8_t status2 = pert_hci_cmd(BT_HCI_OP_LE_ENH_RX_TEST, &cp, sizeof(cp), NULL);
+    if (status2 != DAISY_FACTORY_OK) {
+        return status2;
+    }
+    LOG_INF("pert: RX started (chan %u, phy %u)", req[0], req[1]);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* End the running DTM test. -> [num_rx u16 LE], the packets received since
+ * PERT_RX_START (0 after a TX test). */
+static uint8_t handle_pert_end(uint8_t *payload, uint8_t *out_len) {
+#if !HAS_PERT
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    struct net_buf *rsp = NULL;
+    uint8_t status = pert_hci_cmd(BT_HCI_OP_LE_TEST_END, NULL, 0, &rsp);
+    if (status != DAISY_FACTORY_OK) {
+        return status;
+    }
+    struct bt_hci_rp_le_test_end *rp = (struct bt_hci_rp_le_test_end *)rsp->data;
+    uint16_t num_rx = sys_le16_to_cpu(rp->rx_pkt_count);
+    net_buf_unref(rsp);
+    LOG_INF("pert: test ended, num_rx %u", num_rx);
+    sys_put_le16(num_rx, payload);
+    *out_len = sizeof(num_rx);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
 static void process_work_handler(struct k_work *work) {
     if (!hid_ready) {
         return;
@@ -1259,6 +1531,20 @@ static void process_work_handler(struct k_work *work) {
     case DAISY_FACTORY_CMD_GPIO_GET:
         status = handle_gpio_get(&req_buf[DAISY_FACTORY_OFF_PAYLOAD], req_buf[DAISY_FACTORY_OFF_LEN],
                                  payload, &payload_len);
+        break;
+    case DAISY_FACTORY_CMD_PERT_QUIESCE:
+        status = handle_pert_quiesce();
+        break;
+    case DAISY_FACTORY_CMD_PERT_TX_START:
+        status = handle_pert_tx_start(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                      req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_PERT_RX_START:
+        status = handle_pert_rx_start(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                      req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_PERT_END:
+        status = handle_pert_end(payload, &payload_len);
         break;
     default:
         status = DAISY_FACTORY_ERR_UNKNOWN_CMD;

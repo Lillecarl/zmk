@@ -204,6 +204,65 @@ enum daisy_factory_cmd {
     /* Write a raw 8-bit touchpad register. payload: [reg u8, value u8].
      * Debug/bring-up aid; same HID-I2C-mode caveat as TOUCHPAD_REG_READ. */
     DAISY_FACTORY_CMD_TOUCHPAD_REG_WRITE = 0x92,
+
+    /* group 0xA: PERT (packet-error-rate test via Bluetooth Direct Test Mode)
+     *
+     * Raw-PHY per-channel PER measurement between the keyboard and a test
+     * peer (the Framework dongle). DTM owns the radio exclusively: the host
+     * must send PERT_QUIESCE first and poll BT_STATUS until nothing is
+     * connected or advertising before starting a test. DTM leaves the BLE
+     * stack's scheduler out of the loop, so after a test run the only
+     * supported recovery is a REBOOT (0x53); don't expect the pre-test
+     * connection to resume. All PERT commands are UNSUPPORTED unless the
+     * firmware was built with CONFIG_BT_CTLR_DTM_HCI (see the PERT
+     * capability bit). */
+
+    /* Quiesce the BLE link layer for DTM: disconnect every profile and stop
+     * advertising. The disconnects are asynchronous -- poll BT_STATUS until
+     * connected_mask == 0 and ADV_ENABLED is clear before starting a test.
+     * No payload. */
+    DAISY_FACTORY_CMD_PERT_QUIESCE = 0xA0,
+    /* Start transmitting DTM test packets, continuously until PERT_END.
+     * payload: [chan u8][phy u8][len u8][pattern u8][tx_power i8]:
+     *   chan: RF channel 0-39 (freq = 2402 + 2*chan MHz); BAD_ARG if > 39.
+     *   phy: daisy_factory_pert_phy; BAD_ARG otherwise.
+     *   len: test-data length in bytes, 0-255.
+     *   pattern: daisy_factory_pert_pattern; BAD_ARG if out of range or
+     *     PRBS15 (unimplemented in the Zephyr controller's table).
+     *   tx_power: optional; dBm, floored to the next supported step
+     *     (nRF54LM20A: +8..-46). Defaults to 0 dBm -- the product's
+     *     operating power -- when the payload is 4 bytes.
+     * HW if the controller refuses (e.g. a test is already running or the
+     * radio isn't quiesced). */
+    DAISY_FACTORY_CMD_PERT_TX_START = 0xA1,
+    /* Start receiving DTM test packets, counting until PERT_END.
+     * payload: [chan u8][phy u8] (same validation as PERT_TX_START). */
+    DAISY_FACTORY_CMD_PERT_RX_START = 0xA2,
+    /* Stop the running DTM test. -> [num_rx u16 LE]: packets received since
+     * PERT_RX_START (0 after a TX test). HW if no test was running. */
+    DAISY_FACTORY_CMD_PERT_END = 0xA3,
+};
+
+/* PHY selector for the PERT_*_START commands. Values match the HCI LE
+ * (enhanced) transmitter/receiver-test PHY encoding. Coded PHY is not
+ * offered: the daisy link never uses it and rx would need S=2/S=8 split. */
+enum daisy_factory_pert_phy {
+    DAISY_FACTORY_PERT_PHY_1M = 1,
+    DAISY_FACTORY_PERT_PHY_2M = 2,
+};
+
+/* DTM packet payload patterns for PERT_TX_START. Values match the HCI
+ * transmitter-test pkt_payload encoding (BT Core Vol 4 Part E 7.8.29).
+ * PRBS15 (3) is rejected: the Zephyr split controller stubs its table. */
+enum daisy_factory_pert_pattern {
+    DAISY_FACTORY_PERT_PAT_PRBS9 = 0,
+    DAISY_FACTORY_PERT_PAT_11110000 = 1,
+    DAISY_FACTORY_PERT_PAT_10101010 = 2,
+    DAISY_FACTORY_PERT_PAT_PRBS15 = 3, /* unsupported, documented for completeness */
+    DAISY_FACTORY_PERT_PAT_11111111 = 4,
+    DAISY_FACTORY_PERT_PAT_00000000 = 5,
+    DAISY_FACTORY_PERT_PAT_00001111 = 6,
+    DAISY_FACTORY_PERT_PAT_01010101 = 7,
 };
 
 /* Touchpad power states for DAISY_FACTORY_CMD_TOUCHPAD_POWER_SET, ordered so
@@ -305,6 +364,12 @@ enum daisy_factory_device_type {
     DAISY_FACTORY_DEVICE_KEYBOARD = 0,
     DAISY_FACTORY_DEVICE_DONGLE = 1,
 };
+
+/* Capability bits for daisy_factory_info.capabilities. Bit N corresponds to
+ * command group N where a whole group is build-time optional; groups always
+ * compiled in don't set a bit (the bitmap started life all-zero and existing
+ * hosts ignore it). */
+#define DAISY_FACTORY_CAP_PERT (1u << 0xA) /* group 0xA built (CONFIG_BT_CTLR_DTM_HCI) */
 
 /* CRASH_INFO response payload. `file` and `thread` are NUL-padded but may
  * fill their fields without a terminator. `line`/`file` are only set when
