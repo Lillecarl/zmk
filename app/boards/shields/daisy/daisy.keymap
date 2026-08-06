@@ -53,16 +53,6 @@
         };
     };
     macros {
-        bt_next: bt_next {
-            compatible = "zmk,behavior-macro";
-            #binding-cells = <0>;
-            bindings = <&bt BT_NXT>;
-        };
-        bt_clear: bt_clear {
-            compatible = "zmk,behavior-macro";
-            #binding-cells = <0>;
-            bindings = <&bt BT_CLR>;
-        };
 	// usb_bt_sw: usb_bt_switch {
         //     compatible = "zmk,behavior-macro";
         //     #binding-cells = <0>;
@@ -104,12 +94,21 @@
             compatible = "zmk,behavior-touchpad-power";
             #binding-cells = <1>; /* 1 = enable, 0 = disable */
         };
+        // Physical pairing button: tap = next BLE profile, hold 1s = clear the
+        // active profile's bond. Both go through &pairing (behavior_pairing.c)
+        // instead of &bt BT_NXT / BT_CLR so the button is inert in wired mode
+        // (protocol switch on USB -> BLE off): otherwise it would switch
+        // profiles or wipe a bond on a keyboard that is deliberately cabled.
+        pairing: pairing {
+            compatible = "zmk,behavior-pairing";
+            #binding-cells = <1>; /* 0 = next profile, 1 = clear bond */
+        };
         pairing_ht: pairing_ht {
             compatible = "zmk,behavior-hold-tap";
             #binding-cells = <2>;
             flavor = "hold-preferred";
             tapping-term-ms = <1000>;
-            bindings = <&bt_clear>, <&bt_next>;
+            bindings = <&pairing>, <&pairing>;
             display-name = "Mod-Tap";
         };
     };
@@ -119,8 +118,8 @@
         default_layer {
             display-name = "Default Layer";
             bindings = <
-                &pairing_ht 0 0
-                //&pairing_ht 0 0 &usb_bt_sw
+                &pairing_ht 1 0
+                //&pairing_ht 1 0 &usb_bt_sw
 		// &none &none
                 // ---------------------------------------------------------------------------------------------------------
                 // | ESC  |Mute |Prev |Next  |Prev  |Play  | Next |Search |BrUp   |Displ |Emoji  |Print  | Media |  DEL    |
@@ -167,8 +166,8 @@
         fnlock_layer {
             display-name = "FN Lock Layer";
             bindings = <
-                &pairing_ht 0 0
-                // &pairing_ht 0 0 &usb_bt_sw
+                &pairing_ht 1 0
+                // &pairing_ht 1 0 &usb_bt_sw
 		// &none &none
                 // ---------------------------------------------------------------------------------------------------------
                 // | FNLK |  F1 |  F2 |  F3  |  F4  |  F5  |  F6  |  F7   |  F8   |  F9  |  F10  |  F11  |  F12  |  DEL    |

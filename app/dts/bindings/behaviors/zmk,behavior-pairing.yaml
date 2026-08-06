@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Framework Computer Inc
+# SPDX-License-Identifier: MIT
+
+description: |
+  Daisy pairing-button Behavior. param1 selects the action: 0 = next BLE
+  profile, 1 = clear the active profile's bond. Both are ignored while BLE is
+  off (protocol switch in the wired position).
+
+compatible: "zmk,behavior-pairing"
+
+include: one_param.yaml
