@@ -79,7 +79,7 @@ def _user_home():
 DEFAULT_ASTER = _user_home() / "clone/aster/target/debug/aster"
 DEFAULT_MCUMGRCTL = _user_home() / "clone/mcumgr-toolkit/target/debug/mcumgrctl"
 DEFAULT_REC_GLOB = "/dev/serial/by-id/*Daisy_Keyboard*Recovery*"
-BT_NAME = "Framework TP KB"
+BT_NAME = "Touchpad KB"
 
 EV_KEY = 0x01
 KEY_F24 = 194
