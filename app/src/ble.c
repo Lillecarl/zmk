@@ -54,6 +54,21 @@ enum advertising_type advertising_status;
 #define ZMK_ADV_CONN_NAME                                                                          \
     BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN, BT_GAP_ADV_FAST_INT_MIN_2, BT_GAP_ADV_FAST_INT_MAX_2, NULL)
 
+/* Low duty cycle directed advertising to the one host a profile is bonded to.
+ *
+ * BT_LE_ADV_OPT_DIR_ADDR_RPA makes the controller build TargetA from the peer's
+ * IRK in the resolving list, so privacy-enabled centrals recognize the packet as
+ * addressed to them. A bond without an IRK leaves an all-zero resolving list
+ * entry and the controller falls back to the peer's identity address, which is
+ * what a non-privacy central expects. Requires controller side LL privacy
+ * (BT_FEAT_LE_PRIVACY, i.e. CONFIG_BT_CTLR_PRIVACY); without it bt_le_adv_start()
+ * returns -ENOTSUP, which update_advertising() falls back to open advertising on.
+ */
+#define ZMK_ADV_CONN_DIR(_peer)                                                                    \
+    BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_DIR_MODE_LOW_DUTY |                         \
+                        BT_LE_ADV_OPT_DIR_ADDR_RPA,                                                \
+                    BT_GAP_ADV_FAST_INT_MIN_2, BT_GAP_ADV_FAST_INT_MAX_2, _peer)
+
 static struct zmk_ble_profile profiles[ZMK_BLE_PROFILE_COUNT];
 static uint8_t active_profile;
 
@@ -116,6 +131,31 @@ void set_profile_address(uint8_t index, const bt_addr_le_t *addr) {
     k_work_submit(&raise_profile_changed_event_work);
 }
 
+/* Look up a peer's connection, but only once it is actually established.
+ *
+ * While directed advertising is running the host stack already holds a
+ * placeholder conn object for the target peer (BT_CONN_ADV_DIR_CONNECTABLE),
+ * and bt_conn_lookup_addr_le() happily returns it. Callers that mean "is this
+ * host reachable" must not mistake that for a live link. Returns a referenced
+ * conn (caller unrefs) or NULL.
+ */
+static struct bt_conn *lookup_connected_addr_le(const bt_addr_le_t *addr) {
+    struct bt_conn *conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr);
+    struct bt_conn_info info;
+
+    if (conn == NULL) {
+        return NULL;
+    }
+
+    bt_conn_get_info(conn, &info);
+    if (info.state != BT_CONN_STATE_CONNECTED) {
+        bt_conn_unref(conn);
+        return NULL;
+    }
+
+    return conn;
+}
+
 bool zmk_ble_active_profile_is_connected(void) {
     return zmk_ble_profile_is_connected(active_profile);
 }
@@ -125,19 +165,16 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
         return false;
     }
     struct bt_conn *conn;
-    struct bt_conn_info info;
     bt_addr_le_t *addr = &profiles[index].peer;
     if (!bt_addr_le_cmp(addr, BT_ADDR_LE_ANY)) {
         return false;
-    } else if ((conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr)) == NULL) {
+    } else if ((conn = lookup_connected_addr_le(addr)) == NULL) {
         return false;
     }
 
-    bt_conn_get_info(conn, &info);
-
     bt_conn_unref(conn);
 
-    return info.state == BT_CONN_STATE_CONNECTED;
+    return true;
 }
 
 #define CHECKED_ADV_STOP()                                                                         \
@@ -148,22 +185,6 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
         return err;                                                                                \
     }
 
-#define CHECKED_DIR_ADV()                                                                          \
-    addr = zmk_ble_active_profile_addr();                                                          \
-    conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr);                                            \
-    if (conn != NULL) { /* TODO: Check status of connection */                                     \
-        LOG_DBG("Skipping advertising, profile host is already connected");                        \
-        bt_conn_unref(conn);                                                                       \
-        return 0;                                                                                  \
-    }                                                                                              \
-    err = bt_le_adv_start(BT_LE_ADV_CONN_DIR_LOW_DUTY(addr), zmk_ble_ad, ARRAY_SIZE(zmk_ble_ad),   \
-                          NULL, 0);                                                                \
-    if (err) {                                                                                     \
-        LOG_ERR("Advertising failed to start (err %d)", err);                                      \
-        return err;                                                                                \
-    }                                                                                              \
-    advertising_status = ZMK_ADV_DIR;
-
 #define CHECKED_OPEN_ADV()                                                                         \
     err = bt_le_adv_start(ZMK_ADV_CONN_NAME, zmk_ble_ad, ARRAY_SIZE(zmk_ble_ad), NULL, 0);         \
     if (err) {                                                                                     \
@@ -171,6 +192,26 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
         return err;                                                                                \
     }                                                                                              \
     advertising_status = ZMK_ADV_CONN;
+
+/* Directed advertising carries no AD data, so zmk_ble_ad is not passed here.
+ * If it cannot be started at all we fall back to open advertising: a keyboard
+ * that is discoverable by everyone is bad, but one no host can reach is worse.
+ */
+#define CHECKED_DIR_ADV()                                                                          \
+    addr = zmk_ble_active_profile_addr();                                                          \
+    conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr);                                            \
+    if (conn != NULL) { /* connected, or a directed-adv conn object is already pending */          \
+        LOG_DBG("Skipping advertising, profile host already has a conn object");                   \
+        bt_conn_unref(conn);                                                                       \
+        return 0;                                                                                  \
+    }                                                                                              \
+    err = bt_le_adv_start(ZMK_ADV_CONN_DIR(addr), NULL, 0, NULL, 0);                               \
+    if (err) {                                                                                     \
+        LOG_ERR("Directed advertising failed to start (err %d), falling back to open", err);       \
+        CHECKED_OPEN_ADV();                                                                        \
+    } else {                                                                                       \
+        advertising_status = ZMK_ADV_DIR;                                                          \
+    }
 
 int update_advertising(void) {
     int err = 0;
@@ -181,14 +222,9 @@ int update_advertising(void) {
     if (permit_adv && zmk_ble_active_profile_is_open()) {
         desired_adv = ZMK_ADV_CONN;
     } else if (permit_adv && !zmk_ble_active_profile_is_connected()) {
-        desired_adv = ZMK_ADV_CONN;
-        // Need to fix directed advertising for privacy centrals. See
-        // https://github.com/zephyrproject-rtos/zephyr/pull/14984 char
-        // addr_str[BT_ADDR_LE_STR_LEN]; bt_addr_le_to_str(zmk_ble_active_profile_addr(), addr_str,
-        // sizeof(addr_str));
-
-        // LOG_DBG("Directed advertising to %s", addr_str);
-        // desired_adv = ZMK_ADV_DIR;
+        // The profile is taken, so only its host has any business connecting.
+        // Directed advertising keeps us out of everyone else's scan results.
+        desired_adv = IS_ENABLED(CONFIG_ZMK_BLE_DIRECTED_ADV) ? ZMK_ADV_DIR : ZMK_ADV_CONN;
     }
     LOG_DBG("advertising from %d to %d", advertising_status, desired_adv);
 
@@ -356,7 +392,7 @@ int zmk_ble_prof_disconnect(uint8_t index) {
 
     if (!bt_addr_le_cmp(addr, BT_ADDR_LE_ANY)) {
         return -ENODEV;
-    } else if ((conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr)) == NULL) {
+    } else if ((conn = lookup_connected_addr_le(addr)) == NULL) {
         return -ENODEV;
     }
 
@@ -376,7 +412,7 @@ struct bt_conn *zmk_ble_active_profile_conn(void) {
     if (!bt_addr_le_cmp(addr, BT_ADDR_LE_ANY)) {
         LOG_WRN("Not sending, no active address for current profile");
         return NULL;
-    } else if ((conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr)) == NULL) {
+    } else if ((conn = lookup_connected_addr_le(addr)) == NULL) {
         LOG_WRN("Not sending, not connected to active profile");
         return NULL;
     }

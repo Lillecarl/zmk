@@ -192,6 +192,19 @@ config ZMK_BLE_PASSKEY_ENTRY
     bool "Require passkey entry on the keyboard to complete pairing"
     select RING_BUFFER
 
+config ZMK_BLE_DIRECTED_ADV
+    bool "Use directed advertising for bonded profiles"
+    default y
+    help
+      When the active profile is already bonded but not connected, advertise
+      directly to that one host (low duty cycle ADV_DIRECT_IND) instead of
+      sending open, generally discoverable advertisements. The keyboard then
+      only shows up in scans while the active profile is unpaired, and no
+      other host can connect to a taken profile.
+
+      Set to n to restore the old behavior (always undirected advertising) if
+      a host turns out not to reconnect to directed advertisements.
+
 config BT_SMP_ALLOW_UNAUTH_OVERWRITE
     imply ZMK_BLE_PASSKEY_ENTRY
 
