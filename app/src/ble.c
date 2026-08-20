@@ -622,13 +622,41 @@ static void disconnected(struct bt_conn *conn, uint8_t reason) {
 
 static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_security_err err) {
     char addr[BT_ADDR_LE_STR_LEN];
+    struct bt_conn_info info;
 
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
     if (!err) {
         LOG_DBG("Security changed: %s level %u", addr, level);
-    } else {
-        LOG_ERR("Security failed: %s level %u err %d", addr, level, err);
+        return;
+    }
+
+    LOG_ERR("Security failed: %s level %u err %d", addr, level, err);
+
+    bt_conn_get_info(conn, &info);
+    if (info.role != BT_CONN_ROLE_PERIPHERAL) {
+        return;
+    }
+
+    /* Tear the link down instead of sitting on an unencrypted one.
+     *
+     * The usual way to get here is a host reconnecting with a bond we no
+     * longer have (we were unpaired on the keyboard side): it starts
+     * encryption with its stale LTK, our controller answers the LTK request
+     * negatively, and the resulting Encryption Change failure lands here as
+     * BT_SECURITY_ERR_PIN_OR_KEY_MISSING. Nothing tore the connection down
+     * afterwards, so the host kept a live-but-useless link and went on
+     * showing the keyboard as connected. A HID peripheral can do nothing on
+     * an unencrypted link (every characteristic needs encryption, so
+     * bt_gatt_notify() just returns -EPERM), so dropping it costs nothing and
+     * makes the failure unambiguous to the host.
+     *
+     * This does NOT delete the bond the host is holding -- BLE has no message
+     * for that, the user has to remove the device on the host side.
+     */
+    int derr = bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
+    if (derr) {
+        LOG_WRN("Failed to disconnect %s after security failure (err %d)", addr, derr);
     }
 }
 
