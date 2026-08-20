@@ -463,6 +463,52 @@ static uint8_t handle_charging_set(const uint8_t *req, uint8_t req_len) {
 #endif
 }
 
+/* Read the charger state: BCHGCHARGESTATUS, BCHGERRREASON and VBUSINSTATUS,
+ * raw. The sensor driver refreshes all three on every sample fetch. */
+static uint8_t handle_charging_status(uint8_t *payload, uint8_t *out_len) {
+#if !HAS_CHARGER
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    struct sensor_value status, error, vbus;
+    if (read_charger_channel(SENSOR_CHAN_NPM13XX_CHARGER_STATUS, &status) < 0 ||
+        sensor_channel_get(charger, SENSOR_CHAN_NPM13XX_CHARGER_ERROR, &error) < 0 ||
+        sensor_channel_get(charger, SENSOR_CHAN_NPM13XX_CHARGER_VBUS_STATUS, &vbus) < 0) {
+        return DAISY_FACTORY_ERR_HW;
+    }
+    struct daisy_factory_charging_status out = {
+        .status = (uint8_t)status.val1,
+        .error = (uint8_t)error.val1,
+        .vbus = (uint8_t)vbus.val1,
+    };
+    memcpy(payload, &out, sizeof(out));
+    *out_len = sizeof(out);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* Recover from a latched charger error. Action-only. The sensor driver has no
+ * API for the error tasks (its only error clear is bundled into a charge
+ * re-enable), so strobe them through the MFD like the ship-mode sequence:
+ * TASKCLEARCHGERR wipes the latched BCHGERRREASON/BCHGERRSENSOR, then
+ * TASKRELEASEERROR releases the charger's error state so charging resumes. */
+#define NPM13XX_CHGR_BASE 0x03U
+#define CHGR_OFFSET_TASKRELEASEERROR 0x00U
+#define CHGR_OFFSET_TASKCLEARCHGERR 0x01U
+static uint8_t handle_charging_clear_error(void) {
+#if !HAS_PMIC
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (!device_is_ready(pmic_mfd)) {
+        return DAISY_FACTORY_ERR_HW;
+    }
+    if (mfd_npm13xx_reg_write(pmic_mfd, NPM13XX_CHGR_BASE, CHGR_OFFSET_TASKCLEARCHGERR, 1U) != 0 ||
+        mfd_npm13xx_reg_write(pmic_mfd, NPM13XX_CHGR_BASE, CHGR_OFFSET_TASKRELEASEERROR, 1U) != 0) {
+        return DAISY_FACTORY_ERR_HW;
+    }
+    return DAISY_FACTORY_OK;
+#endif
+}
+
 #if HAS_PMIC
 /* Returns true if VBUS is currently present (USB plugged in). On targets without
  * the charger we can't tell, so assume it's already safe to enter hibernate. */
@@ -1435,6 +1481,12 @@ static void process_work_handler(struct k_work *work) {
     case DAISY_FACTORY_CMD_CHARGING_SET:
         status = handle_charging_set(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
                                      req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_CHARGING_STATUS:
+        status = handle_charging_status(payload, &payload_len);
+        break;
+    case DAISY_FACTORY_CMD_CHARGING_CLEAR_ERROR:
+        status = handle_charging_clear_error();
         break;
     case DAISY_FACTORY_CMD_SHIP_MODE:
         status = handle_ship_mode();

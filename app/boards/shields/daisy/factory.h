@@ -81,6 +81,18 @@ enum daisy_factory_cmd {
 
     /* group 0x2: charging */
     DAISY_FACTORY_CMD_CHARGING_SET = 0x20, /* payload: [enable u8 (0=stop, 1=start)] */
+    /* Read the nPM1300 charger state: the raw BCHGCHARGESTATUS, BCHGERRREASON
+     * and VBUSINSTATUS registers. No payload in; out: struct
+     * daisy_factory_charging_status (bit meanings: DAISY_FACTORY_CHG_*).
+     * A nonzero `error` is latched: the charger has stopped on that error and
+     * stays stopped until CHARGING_CLEAR_ERROR (or a CHARGING_SET restart)
+     * releases it. UNSUPPORTED on targets without the PMIC. */
+    DAISY_FACTORY_CMD_CHARGING_STATUS = 0x21,
+    /* Recover from a latched charger error: strobes TASKCLEARCHGERR (clears
+     * BCHGERRREASON/BCHGERRSENSOR) then TASKRELEASEERROR (releases the charger
+     * from its error state so charging resumes). Action-only, no payload;
+     * harmless when no error is latched. UNSUPPORTED without the PMIC. */
+    DAISY_FACTORY_CMD_CHARGING_CLEAR_ERROR = 0x22,
 
     /* group 0x3: LEDs */
     DAISY_FACTORY_CMD_LED_SET_PWM = 0x30,      /* payload: [index u8][percent u8 0-100] */
@@ -340,6 +352,44 @@ enum daisy_factory_gpio {
     DAISY_FACTORY_GPIO_ISO_STRAP = 2,
     DAISY_FACTORY_GPIO_ANSI_STRAP = 3,
 };
+
+/* CHARGING_STATUS response payload: raw nPM1300 charger registers, one byte
+ * each, decoded with the DAISY_FACTORY_CHG_* bit masks below.
+ * - `status` = BCHGCHARGESTATUS (0x03:0x34), the live charging state.
+ * - `error`  = BCHGERRREASON (0x03:0x36), the latched stop reason; 0 = none.
+ * - `vbus`   = VBUSINSTATUS (0x02:0x07), the USB input supply state. */
+struct daisy_factory_charging_status {
+    uint8_t status;
+    uint8_t error;
+    uint8_t vbus;
+} __attribute__((packed));
+
+/* BCHGCHARGESTATUS bits. */
+#define DAISY_FACTORY_CHG_STATUS_BATT_DETECTED (1u << 0)
+#define DAISY_FACTORY_CHG_STATUS_COMPLETED (1u << 1)     /* charged to VTERM */
+#define DAISY_FACTORY_CHG_STATUS_TRICKLE (1u << 2)
+#define DAISY_FACTORY_CHG_STATUS_CONST_CURRENT (1u << 3)
+#define DAISY_FACTORY_CHG_STATUS_CONST_VOLTAGE (1u << 4)
+#define DAISY_FACTORY_CHG_STATUS_RECHARGE (1u << 5)
+#define DAISY_FACTORY_CHG_STATUS_DIETEMP_PAUSED (1u << 6) /* die too hot */
+#define DAISY_FACTORY_CHG_STATUS_SUPPLEMENT (1u << 7)     /* battery assisting VBUS */
+
+/* BCHGERRREASON bits (latched until CHARGING_CLEAR_ERROR). */
+#define DAISY_FACTORY_CHG_ERR_NTC_SENSOR (1u << 0)
+#define DAISY_FACTORY_CHG_ERR_VBAT_SENSOR (1u << 1)
+#define DAISY_FACTORY_CHG_ERR_VBAT_LOW (1u << 2)
+#define DAISY_FACTORY_CHG_ERR_VTRICKLE (1u << 3)
+#define DAISY_FACTORY_CHG_ERR_MEAS_TIMEOUT (1u << 4)
+#define DAISY_FACTORY_CHG_ERR_CHARGE_TIMEOUT (1u << 5)
+#define DAISY_FACTORY_CHG_ERR_TRICKLE_TIMEOUT (1u << 6)
+
+/* VBUSINSTATUS bits. */
+#define DAISY_FACTORY_CHG_VBUS_PRESENT (1u << 0)
+#define DAISY_FACTORY_CHG_VBUS_CURR_LIMIT (1u << 1)
+#define DAISY_FACTORY_CHG_VBUS_OVERVOLT_PROT (1u << 2)
+#define DAISY_FACTORY_CHG_VBUS_UNDERVOLT (1u << 3)
+#define DAISY_FACTORY_CHG_VBUS_SUSPENDED (1u << 4)
+#define DAISY_FACTORY_CHG_VBUS_OUT_ACTIVE (1u << 5)
 
 /* Response status codes. 0 == success. */
 enum daisy_factory_status {
