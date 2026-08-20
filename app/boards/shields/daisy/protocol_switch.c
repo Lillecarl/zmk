@@ -157,9 +157,28 @@ static void eval_work_handler(struct k_work *work) {
         k_work_cancel_delayable(&power_work);
     }
 }
-static K_WORK_DEFINE(eval_work, eval_work_handler);
+static K_WORK_DELAYABLE_DEFINE(eval_work, eval_work_handler);
 
-static void schedule_eval(void) { k_work_submit_to_queue(&pq, &eval_work); }
+static void schedule_eval(void) { k_work_reschedule_for_queue(&pq, &eval_work, K_NO_WAIT); }
+
+/*
+ * The boot evaluation waits for ZMK's BLE startup instead of running straight
+ * out of SYS_INIT.
+ *
+ * ZMK brings BLE up from the "ble" settings handler's h_commit
+ * (zmk_ble_complete_startup -> zmk_ble_ready -> update_advertising), which runs
+ * at the end of settings_load() -- after our SYS_INIT. Firing apply_policy()
+ * before that gets `Advertising failed to start (err -11)`: bt_le_adv_start()
+ * bails with -EAGAIN before BT_DEV_READY, and the failure is swallowed.
+ *
+ * (While reconnect advertising was directed, landing after BLE startup also
+ * gave a bonded profile's resolving-list entry a second chance to reach the
+ * controller on a battery-only boot -- see
+ * ../../../../aster/issues/reset-reconnect-failure.md. Stealth undirected
+ * advertising no longer depends on the resolving list, so the -EAGAIN
+ * swallowing above is the one remaining reason for this delay.)
+ */
+#define BOOT_EVAL_DELAY K_MSEC(500)
 
 /* gpio-keys turns the switch into INPUT_KEY_1 key events (value 1 = asserted =
  * wireless). Listen on all input devices and filter by code — the board's
@@ -202,8 +221,9 @@ static int protocol_switch_init(void) {
     LOG_INF("boot protocol switch: %s", current_mode == MODE_WIRELESS ? "wireless" : "wired");
 
     /* Defer the first apply to the coop queue so it runs after BLE/endpoint
-     * init has settled, and so a wired+unplugged boot powers off cleanly. */
-    schedule_eval();
+     * init has settled, and so a wired+unplugged boot powers off cleanly.
+     * See BOOT_EVAL_DELAY for why the boot one waits rather than running now. */
+    k_work_reschedule_for_queue(&pq, &eval_work, BOOT_EVAL_DELAY);
     return 0;
 }
 SYS_INIT(protocol_switch_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
