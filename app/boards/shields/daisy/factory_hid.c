@@ -196,6 +196,15 @@ static const struct device *const touchpad = DEVICE_DT_GET(DT_NODELABEL(touchpad
 #define PERT_MAX_CHANNEL 39
 #endif
 
+/* RF test modes (group 0xB): Nordic's radio_test driven off the nrfx radio
+ * HAL, for CE/FCC certification. Unlike PERT this owns the radio outright --
+ * entering shuts the whole Bluetooth stack down -- so the handlers live in
+ * factory_rf.c with the driver. */
+#define HAS_RF IS_ENABLED(CONFIG_DAISY_FACTORY_RF)
+#if HAS_RF
+#include "factory_rf.h"
+#endif
+
 /* Caps lock LED (plain GPIO, gpio-leds child on the board). Normally driven by
  * the HID-indicator listener in capslock.c; the factory command pokes the pin
  * directly, so a caps-lock change from the host will overwrite it. */
@@ -273,6 +282,21 @@ static const uint8_t factory_report_desc[] = {
 static uint8_t req_buf[DAISY_FACTORY_REPORT_SIZE];
 static struct k_work process_work;
 
+/* Handlers run on their own queue, not the system workqueue. Two reasons:
+ * a handler can take a long time (RF_ENTER tears the whole Bluetooth stack
+ * down) and must not stall unrelated system work; and the system workqueue is
+ * cooperative (CONFIG_SYSTEM_WORKQUEUE_PRIORITY=-1), so a handler that spins
+ * there starves every preemptible thread -- including the deferred log thread,
+ * which turns a stuck command into a device that says nothing about why it is
+ * stuck. Preemptible priority keeps logging alive in that case.
+ *
+ * Stack is sized for the deepest handler: RF_ENTER's bt_disable() plus
+ * radio_test_init(), which the system workqueue's 2 KB would not have covered
+ * with much room to spare. */
+static K_THREAD_STACK_DEFINE(process_q_stack, 4096);
+static struct k_work_q process_q;
+#define PROCESS_Q_PRIORITY K_PRIO_PREEMPT(5)
+
 /* Input reports bounce through a UDC-aligned static buffer: the DWC2 DMA path
  * rejects buffers less aligned than USB_BUF_ALIGN. */
 UDC_STATIC_BUF_DEFINE(resp_buf, DAISY_FACTORY_REPORT_SIZE);
@@ -308,7 +332,7 @@ static int set_report_cb(const struct device *dev, const uint8_t type, const uin
     /* Copy and defer; never block the control transfer. */
     memset(req_buf, 0, sizeof(req_buf));
     memcpy(req_buf, buf, len);
-    k_work_submit(&process_work);
+    k_work_submit_to_queue(&process_q, &process_work);
     return 0;
 }
 
@@ -327,9 +351,8 @@ static uint8_t handle_info(uint8_t *payload, uint8_t *out_len) {
         .fw_major = APP_VERSION_MAJOR,
         .fw_minor = APP_VERSION_MINOR,
         .fw_patch = APP_PATCHLEVEL,
-        .capabilities = IS_ENABLED(CONFIG_BT_CTLR_DTM_HCI) && IS_ENABLED(CONFIG_ZMK_BLE)
-                            ? DAISY_FACTORY_CAP_PERT
-                            : 0,
+        .capabilities = (HAS_PERT ? DAISY_FACTORY_CAP_PERT : 0) |
+                        (HAS_RF ? DAISY_FACTORY_CAP_RF : 0),
     };
     memcpy(payload, &info, sizeof(info));
     *out_len = sizeof(info);
@@ -1441,6 +1464,49 @@ static uint8_t handle_pert_end(uint8_t *payload, uint8_t *out_len) {
 #endif
 }
 
+/* RF test modes (group 0xB). The handlers themselves live in factory_rf.c --
+ * they pull in the radio_test driver, which is a lot of machinery to have
+ * inline here. These wrappers exist so the dispatch table reads the same as
+ * every other group and so a build without CONFIG_DAISY_FACTORY_RF still
+ * answers the opcodes (with UNSUPPORTED) rather than UNKNOWN_CMD. */
+static uint8_t handle_rf_enter(void) {
+#if !HAS_RF
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    return daisy_factory_rf_enter();
+#endif
+}
+
+static uint8_t handle_rf_start(const uint8_t *req, uint8_t req_len) {
+#if !HAS_RF
+    ARG_UNUSED(req);
+    ARG_UNUSED(req_len);
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    return daisy_factory_rf_start(req, req_len);
+#endif
+}
+
+static uint8_t handle_rf_stop(uint8_t *payload, uint8_t *out_len) {
+#if !HAS_RF
+    ARG_UNUSED(payload);
+    ARG_UNUSED(out_len);
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    return daisy_factory_rf_stop(payload, out_len);
+#endif
+}
+
+static uint8_t handle_rf_status(uint8_t *payload, uint8_t *out_len) {
+#if !HAS_RF
+    ARG_UNUSED(payload);
+    ARG_UNUSED(out_len);
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    return daisy_factory_rf_status(payload, out_len);
+#endif
+}
+
 static void process_work_handler(struct k_work *work) {
     if (!hid_ready) {
         return;
@@ -1598,6 +1664,19 @@ static void process_work_handler(struct k_work *work) {
     case DAISY_FACTORY_CMD_PERT_END:
         status = handle_pert_end(payload, &payload_len);
         break;
+    case DAISY_FACTORY_CMD_RF_ENTER:
+        status = handle_rf_enter();
+        break;
+    case DAISY_FACTORY_CMD_RF_START:
+        status = handle_rf_start(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                 req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_RF_STOP:
+        status = handle_rf_stop(payload, &payload_len);
+        break;
+    case DAISY_FACTORY_CMD_RF_STATUS:
+        status = handle_rf_status(payload, &payload_len);
+        break;
     default:
         status = DAISY_FACTORY_ERR_UNKNOWN_CMD;
         break;
@@ -1626,6 +1705,13 @@ static int daisy_factory_hid_init(void) {
     }
 
     k_work_init(&process_work, process_work_handler);
+
+    /* Started before hid_device_register() so the queue exists by the time the
+     * host can send the first request. See process_q for why it isn't the
+     * system workqueue. */
+    k_work_queue_start(&process_q, process_q_stack, K_THREAD_STACK_SIZEOF(process_q_stack),
+                       PROCESS_Q_PRIORITY, NULL);
+    k_thread_name_set(k_work_queue_thread_get(&process_q), "daisy_factory");
 
 #if HAS_PMIC
     /* Ship-mode poll queue; see ship_q definition for why it's not the

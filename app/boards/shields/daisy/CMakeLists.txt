@@ -6,6 +6,12 @@ endif()
 if(CONFIG_DAISY_FACTORY)
   zephyr_library_sources(factory_hid.c)
 endif()
+# RF test modes (protocol group 0xB) for CE/FCC certification: the group 0xB
+# handlers plus the vendored Nordic radio_test driver they wrap.
+if(CONFIG_DAISY_FACTORY_RF)
+  zephyr_library_sources(factory_rf.c)
+  zephyr_library_sources(rf/radio_test.c)
+endif()
 # Crash breadcrumb (fatal-error handler + __noinit record). Not factory-only:
 # the record is also what makes RESET_ON_FATAL_ERROR reboots diagnosable.
 zephyr_library_sources(crash_info.c)

@@ -236,7 +236,9 @@ enum daisy_factory_cmd {
     DAISY_FACTORY_CMD_PERT_QUIESCE = 0xA0,
     /* Start transmitting DTM test packets, continuously until PERT_END.
      * payload: [chan u8][phy u8][len u8][pattern u8][tx_power i8]:
-     *   chan: RF channel 0-39 (freq = 2402 + 2*chan MHz); BAD_ARG if > 39.
+     *   chan: DTM channel 0-39 (freq = 2402 + 2*chan MHz); BAD_ARG if > 39.
+     *     Note this is NOT group 0xB's channel numbering, which is MHz above
+     *     2400 (0..80). Channel 20 here is 2442 MHz; in group 0xB it's 2420.
      *   phy: daisy_factory_pert_phy; BAD_ARG otherwise.
      *   len: test-data length in bytes, 0-255.
      *   pattern: daisy_factory_pert_pattern; BAD_ARG if out of range or
@@ -253,7 +255,155 @@ enum daisy_factory_cmd {
     /* Stop the running DTM test. -> [num_rx u16 LE]: packets received since
      * PERT_RX_START (0 after a TX test). HW if no test was running. */
     DAISY_FACTORY_CMD_PERT_END = 0xA3,
+
+    /* group 0xB: RF test modes (CE/FCC certification)
+     *
+     * Nordic's radio_test driven straight off the nrfx radio HAL: unmodulated
+     * (CW) TX, modulated TX, duty-cycled modulated TX, RX with a packet
+     * count, and TX/RX channel sweeps -- the modes Lite-On's BT-test SOP asks
+     * for, at any channel and TX power. This is the same code the standalone
+     * radio_test image runs, compiled into the product firmware so the lab
+     * needs no image swap.
+     *
+     * Distinct from group 0xA in every way that matters: PERT rides the BLE
+     * controller's Direct Test Mode and speaks BLE packets, while this owns
+     * the radio outright and the BLE stack is gone.
+     *
+     * !! CHANNEL NUMBERING !! Group 0xB channels are MHz above 2400, range
+     * 0..80 -- 2402/2440/2480 MHz are 2/40/80. Group 0xA channels are DTM
+     * indices 0..39 (freq = 2402 + 2*chan). The same number means a different
+     * frequency in the two groups; do not copy one into the other.
+     *
+     * Lifecycle: RF_ENTER once (it tears the BLE stack down and takes the
+     * radio), then any number of RF_START/RF_STOP/RF_STATUS. Entering is
+     * ONE-WAY -- there is no command that gives the radio back. Recovery is
+     * REBOOT (0x53). USB is untouched throughout, so this interface stays up
+     * for the whole test session.
+     *
+     * All group 0xB commands are UNSUPPORTED unless the firmware was built
+     * with CONFIG_DAISY_FACTORY_RF (see the RF capability bit). */
+
+    /* Take the radio for RF testing: stop advertising, disconnect every
+     * profile, shut the BLE stack down (bt_disable), start the HFXO, and
+     * initialize the radio-test driver. No payload. Idempotent -- a second
+     * call on an already-entered device just succeeds.
+     *
+     * LOCKED unless factory mode is active (FACTORY_MODE_SET 0x51). That gate
+     * is deliberate: this ships in production firmware and kills BLE until
+     * the next reboot, so it must not be one stray HID report away on a
+     * user's keyboard.
+     *
+     * HW if the BLE teardown or the radio/clock init fails. */
+    DAISY_FACTORY_CMD_RF_ENTER = 0xB0,
+    /* Configure and start an RF test mode. Any running test is cancelled
+     * first, so RF_START can be called back to back without RF_STOP.
+     * payload: [mode u8][rate u8][pattern u8][tx_power i8][chan_start u8]
+     *          [chan_end u8][dwell_ms u16 LE][duty u8][packets u32 LE]
+     *   mode:       daisy_factory_rf_mode; BAD_ARG otherwise.
+     *   rate:       daisy_factory_rf_rate; BAD_ARG otherwise.
+     *   pattern:    daisy_factory_rf_pattern; BAD_ARG otherwise.
+     *   tx_power:   dBm (nRF54LM20A: +8 max, down to -46). Values off the
+     *               hardware's step list fall back to 0 dBm.
+     *   chan_start: 0..80, MHz above 2400. The channel for the non-sweep
+     *               modes, the first channel for the sweeps. BAD_ARG if > 80.
+     *   chan_end:   0..80, last channel of a sweep; ignored otherwise.
+     *               BAD_ARG if > 80 or < chan_start when a sweep is selected.
+     *   dwell_ms:   0..99 ms on each channel of a sweep; ignored otherwise.
+     *               BAD_ARG if > 99 (the radio-test timer's range).
+     *   duty:       1..90 percent, MODULATED_TX_DUTY_CYCLE only; BAD_ARG if
+     *               out of range for that mode, ignored for the others.
+     *   packets:    number of packets for MODULATED_TX and RX; 0 = run until
+     *               RF_STOP. When nonzero the test ends by itself and
+     *               RF_STATUS's `running` clears -- that is how a host waits
+     *               for a counted run to finish.
+     * HW if RF_ENTER hasn't run. */
+    DAISY_FACTORY_CMD_RF_START = 0xB1,
+    /* Stop the running test and return the RX packet count.
+     * -> [rx_packets u32 LE]: packets received with a valid CRC since the
+     * last RX-mode RF_START (0 after a TX-mode test). Safe to call when no
+     * test is running. HW if RF_ENTER hasn't run. */
+    DAISY_FACTORY_CMD_RF_STOP = 0xB2,
+    /* Read the RF test state. No payload in; out: struct
+     * daisy_factory_rf_status. Serves as both the "what is configured"
+     * readback and the completion poll for counted runs. Valid before
+     * RF_ENTER (it reports entered = 0). */
+    DAISY_FACTORY_CMD_RF_STATUS = 0xB3,
 };
+
+/* Test mode for RF_START. Values mirror `enum radio_test_mode` in
+ * rf/radio_test.h, but are pinned here because this is the wire contract --
+ * a reordering upstream must not silently change the protocol. */
+enum daisy_factory_rf_mode {
+    DAISY_FACTORY_RF_MODE_UNMODULATED_TX = 0, /* CW carrier */
+    DAISY_FACTORY_RF_MODE_MODULATED_TX = 1,
+    DAISY_FACTORY_RF_MODE_RX = 2,
+    DAISY_FACTORY_RF_MODE_TX_SWEEP = 3,
+    DAISY_FACTORY_RF_MODE_RX_SWEEP = 4,
+    DAISY_FACTORY_RF_MODE_MODULATED_TX_DUTY_CYCLE = 5,
+};
+
+/* Radio data rate for RF_START. Only the BLE PHYs daisy's cert scope covers
+ * are offered; the radio also does IEEE 802.15.4 and the proprietary nRF
+ * rates, which are out of scope (daisy is BLE-only). */
+enum daisy_factory_rf_rate {
+    DAISY_FACTORY_RF_RATE_BLE_1M = 0,
+    DAISY_FACTORY_RF_RATE_BLE_2M = 1,
+};
+
+/* Transmit pattern for the modulated RF_START modes. Values mirror
+ * `enum transmit_pattern` in rf/radio_test.h; pinned here for the same reason
+ * as the modes. The SOP's modulated-TX step uses 11110000. */
+enum daisy_factory_rf_pattern {
+    DAISY_FACTORY_RF_PAT_RANDOM = 0,
+    DAISY_FACTORY_RF_PAT_11110000 = 1,
+    DAISY_FACTORY_RF_PAT_11001100 = 2,
+};
+
+/* Channel bounds for RF_START, in MHz above 2400. The radio-test driver
+ * accepts the full 0..80 range; the SOP's low/mid/high are 2/40/80. */
+#define DAISY_FACTORY_RF_CHANNEL_MAX 80
+/* Sweep dwell time bound, in ms (the radio-test timer's usable range). */
+#define DAISY_FACTORY_RF_DWELL_MS_MAX 99
+/* Duty-cycle bounds, in percent, for MODULATED_TX_DUTY_CYCLE. */
+#define DAISY_FACTORY_RF_DUTY_MIN 1
+#define DAISY_FACTORY_RF_DUTY_MAX 90
+
+/* RF_STATUS response payload.
+ * - `entered` is 1 once RF_ENTER has taken the radio (BLE is gone).
+ * - `running` is 1 while a test is on air. It clears by itself when a counted
+ *   MODULATED_TX or RX run completes, which is how a host waits for one to
+ *   finish -- the shell image printed "The modulated TX has finished"; over a
+ *   request/response protocol this flag is the equivalent.
+ * - the config fields echo the last accepted RF_START (zeroed before the
+ *   first one), so this doubles as the `parameters_print` readback.
+ * - `rx_packets` is the valid-CRC count since the last RX-mode RF_START, live
+ *   while RX is running; it is NOT cleared by RF_STOP (same semantics as the
+ *   shell image's print_rx: the next RX start resets it).
+ * - `tx_packets` is the count put on air since the current run started, live
+ *   while it runs. It is the only host-visible evidence that a *continuous*
+ *   transmit is really keying the radio -- `running` is just the firmware's own
+ *   flag. Nonzero only for the modulated TX modes; 0 for an unmodulated
+ *   carrier (which sends no packets), for RX and for the sweeps.
+ *
+ * The first 19 bytes through `rx_packets` are byte-identical to the dongle's
+ * `rf_status_t` (hid-remapper-private, firmware/src/types.h), and `tx_packets`
+ * sits at the same offset 19 there, so one host decoder serves both. Append any
+ * future field at the end, on both sides. */
+struct daisy_factory_rf_status {
+    uint8_t entered;
+    uint8_t running;
+    uint8_t mode;    /* daisy_factory_rf_mode */
+    uint8_t rate;    /* daisy_factory_rf_rate */
+    uint8_t pattern; /* daisy_factory_rf_pattern */
+    int8_t tx_power; /* dBm */
+    uint8_t chan_start;
+    uint8_t chan_end;
+    uint16_t dwell_ms;   /* LE */
+    uint8_t duty;        /* percent */
+    uint32_t packets;    /* LE, 0 = continuous */
+    uint32_t rx_packets; /* LE */
+    uint32_t tx_packets; /* LE */
+} __attribute__((packed));
 
 /* PHY selector for the PERT_*_START commands. Values match the HCI LE
  * (enhanced) transmitter/receiver-test PHY encoding. Coded PHY is not
@@ -420,6 +570,7 @@ enum daisy_factory_device_type {
  * compiled in don't set a bit (the bitmap started life all-zero and existing
  * hosts ignore it). */
 #define DAISY_FACTORY_CAP_PERT (1u << 0xA) /* group 0xA built (CONFIG_BT_CTLR_DTM_HCI) */
+#define DAISY_FACTORY_CAP_RF (1u << 0xB)   /* group 0xB built (CONFIG_DAISY_FACTORY_RF) */
 
 /* CRASH_INFO response payload. `file` and `thread` are NUL-padded but may
  * fill their fields without a terminator. `line`/`file` are only set when

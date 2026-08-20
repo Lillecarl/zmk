@@ -13,6 +13,42 @@ config DAISY_FACTORY
       the required `factory_hid` devicetree node. Leave off for production
       firmware. Selects HWINFO for the device-id (FICR) read command.
 
+config DAISY_FACTORY_RF
+    bool "Daisy factory RF test modes (CE/FCC)"
+    depends on DAISY_FACTORY && SOC_SERIES_NRF54L
+    default y
+    select DYNAMIC_INTERRUPTS
+    select DYNAMIC_DIRECT_INTERRUPTS
+    select BT_CTLR_DYNAMIC_INTERRUPTS if BT_LL_SW_SPLIT
+    select NRFX_TIMER
+    select NRFX_GPPI
+    select CLOCK_CONTROL
+    help
+      Compile factory protocol group 0xB: Nordic's radio_test (unmodulated TX,
+      modulated TX, duty-cycle TX, RX with a packet count, TX/RX sweeps) driven
+      over the factory HID interface by `aster rf`. This is what the CE/FCC lab
+      uses, and it ships in production firmware on purpose -- the lab cannot
+      reflash a keyboard to a dedicated test image.
+
+      Entering RF mode shuts the Bluetooth stack down to take the radio, and is
+      one-way (recovery is a reboot). It is gated on factory mode, so a stray
+      HID report cannot trigger it on a user's keyboard.
+
+      BT_CTLR_DYNAMIC_INTERRUPTS is the load-bearing select: without it the
+      controller claims the RADIO interrupt with a build-time IRQ_DIRECT_CONNECT
+      that radio_test's irq_connect_dynamic() cannot take over. With it, the
+      controller connects its ISRs at bt_enable() and releases them in
+      ll_deinit(), which is exactly what that symbol exists for.
+
+config RADIO_TEST_RX_TIMEOUT
+    int "RF test: RX packet reception timeout, seconds"
+    depends on DAISY_FACTORY_RF
+    default 10
+    help
+      How long a counted RX run waits for its first packet before disabling the
+      radio. Carried over from the radio_test sample's Kconfig, which the
+      vendored driver in rf/ still reads.
+
 config ZMK_KEYBOARD_NAME
     # TODO: Full name (Current limit is 16 - BT_DEVICE_NAME_MAX)
     #        1234567890123456
