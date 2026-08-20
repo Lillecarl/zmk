@@ -937,6 +937,62 @@ static uint8_t handle_bt_status(uint8_t *payload, uint8_t *out_len) {
 #endif
 }
 
+#if IS_ENABLED(CONFIG_ZMK_BLE)
+/* Link-layer diagnostic counters, defined in this tree's zephyr fork
+ * (subsys/bluetooth/controller: lll_adv.c and hal/nrf5/radio/radio.c).
+ * Defined __weak here so this file still links against a zephyr without
+ * those patches -- the weak zeros lose to the strong definitions when the
+ * instrumented controller is present. `advertising_status` is ZMK's own
+ * (app/src/ble.c), which is always there. */
+__weak uint32_t zmk_diag_ci_seen;
+__weak uint32_t zmk_diag_ci_accepted;
+__weak uint32_t zmk_diag_ci_rl_not_allowed;
+__weak uint32_t zmk_diag_ci_adva_bad;
+__weak uint32_t zmk_diag_ci_tgta_bad;
+__weak uint32_t zmk_diag_ci_rx_unresolved;
+__weak uint32_t zmk_diag_ar_cfg;
+__weak uint32_t zmk_diag_ar_no_bc;
+__weak uint32_t zmk_diag_ar_end_timeout;
+__weak uint32_t zmk_diag_ar_notresolved;
+__weak uint32_t zmk_diag_ar_resolved;
+extern enum advertising_type advertising_status;
+#endif
+
+/* Report BLE link-layer diagnostics: real advertising state (stealth vs open
+ * vs off) and the controller's CONNECT_IND / address-resolver counters.
+ * -> struct daisy_factory_bt_diag. */
+static uint8_t handle_bt_diag(uint8_t *payload, uint8_t *out_len) {
+#if !IS_ENABLED(CONFIG_ZMK_BLE)
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+/* Counters saturate at u16 on the wire so the struct fits the single-frame
+ * payload; a diagnosis only needs "is this climbing", never the exact count. */
+#define BT_DIAG_SAT(counter) sys_cpu_to_le16((uint16_t)MIN((counter), UINT16_MAX))
+    struct daisy_factory_bt_diag diag = {
+        .adv_status = (uint8_t)advertising_status,
+        .adv_phase = zmk_ble_adv_phase_diag(),
+        .ci_seen = BT_DIAG_SAT(zmk_diag_ci_seen),
+        .ci_accepted = BT_DIAG_SAT(zmk_diag_ci_accepted),
+        .ci_rl_not_allowed = BT_DIAG_SAT(zmk_diag_ci_rl_not_allowed),
+        .ci_adva_bad = BT_DIAG_SAT(zmk_diag_ci_adva_bad),
+        .ci_tgta_bad = BT_DIAG_SAT(zmk_diag_ci_tgta_bad),
+        .ci_rx_unresolved = BT_DIAG_SAT(zmk_diag_ci_rx_unresolved),
+        .ar_configured = BT_DIAG_SAT(zmk_diag_ar_cfg),
+        .ar_no_bitcount = BT_DIAG_SAT(zmk_diag_ar_no_bc),
+        .ar_end_timeout = BT_DIAG_SAT(zmk_diag_ar_end_timeout),
+        .ar_notresolved = BT_DIAG_SAT(zmk_diag_ar_notresolved),
+        .ar_resolved = BT_DIAG_SAT(zmk_diag_ar_resolved),
+    };
+#undef BT_DIAG_SAT
+    BUILD_ASSERT(sizeof(diag) <= DAISY_FACTORY_PAYLOAD_SIZE,
+                 "bt_diag response must fit a single frame");
+
+    memcpy(payload, &diag, sizeof(diag));
+    *out_len = sizeof(diag);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
 /* Enable/disable BLE advertising. req = [enable]. Action-only. */
 static uint8_t handle_bt_adv_set(const uint8_t *req, uint8_t req_len) {
 #if !IS_ENABLED(CONFIG_ZMK_BLE)
@@ -1628,6 +1684,9 @@ static void process_work_handler(struct k_work *work) {
         break;
     case DAISY_FACTORY_CMD_BT_STATUS:
         status = handle_bt_status(payload, &payload_len);
+        break;
+    case DAISY_FACTORY_CMD_BT_DIAG:
+        status = handle_bt_diag(payload, &payload_len);
         break;
     case DAISY_FACTORY_CMD_BT_ADV_SET:
         status = handle_bt_adv_set(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],

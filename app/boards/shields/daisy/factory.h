@@ -174,6 +174,14 @@ enum daisy_factory_cmd {
      * slot. Iterate 0..profile_count on the host to enumerate every slot; ZMK
      * stores nothing else per slot (the name field is unused). */
     DAISY_FACTORY_CMD_BT_PROFILE_GET = 0x69,
+    /* BLE link-layer diagnostics: what the radio actually did, not just what
+     * the host permitted. No payload in; -> struct daisy_factory_bt_diag.
+     * Distinguishes advertising-directed / advertising-open /
+     * not-advertising (which BT_STATUS's adv-enabled flag cannot), and
+     * reports the controller's CONNECT_IND acceptance counters plus the
+     * nRF54L address-resolver (AAR) health counters. Reads are cheap and
+     * side-effect free; counters reset on reboot. */
+    DAISY_FACTORY_CMD_BT_DIAG = 0x6A,
 
     /* group 0x7: HID endpoints (where input reports are routed) */
     /* -> [preferred u8 (daisy_factory_transport)][selected u8][ble_profile u8].
@@ -450,6 +458,45 @@ struct daisy_factory_bt_status {
     uint8_t flags;         /* DAISY_FACTORY_BT_FLAG_* */
     uint8_t connected_mask; /* bit N: profile N has an active connection */
     uint8_t bonded_mask;    /* bit N: profile N has a stored bond */
+} __attribute__((packed));
+
+/* BT_DIAG advertising states (ZMK's enum advertising_type). */
+enum daisy_factory_bt_adv_status {
+    DAISY_FACTORY_BT_ADV_NONE = 0,    /* not advertising */
+    DAISY_FACTORY_BT_ADV_STEALTH = 1, /* connectable but non-discoverable, for the
+                                       * bonded host (was ADV_DIRECT_IND "directed"
+                                       * on firmware before 2026-08-20) */
+    DAISY_FACTORY_BT_ADV_OPEN = 2,    /* connectable undirected, discoverable */
+};
+
+/* BT_DIAG response payload. All counters are u16 little-endian, increasing
+ * since boot and saturating at 0xFFFF (u16 so the whole struct fits the
+ * single-frame 27-byte payload; saturation loses nothing a diagnosis needs).
+ * The ci_* counters instrument the controller's CONNECT_IND acceptance path
+ * while advertising (lll_adv.c); the ar_* counters instrument the radio's
+ * hardware address resolver (AAR), which on nRF54LM20A frequently never
+ * completes -- ar_end_timeout climbing while ar_resolved stays 0 is that bug
+ * in action, and ci_rx_unresolved growing in step with ci_seen means
+ * initiators' RPAs are reaching the acceptance check unresolved (see aster
+ * issues/reset-reconnect-failure.md). */
+struct daisy_factory_bt_diag {
+    uint8_t adv_status; /* enum daisy_factory_bt_adv_status */
+    uint8_t adv_phase;  /* stealth advertising cadence: 0 = n/a, 1 = fast
+                         * burst window (20 ms interval), 2 = slow fallback
+                         * (100-150 ms). Older directed-adv firmware also used
+                         * the high nibble (bursts left in the chain); now
+                         * always 0 there. */
+    uint16_t ci_seen;           /* CONNECT_INDs received while advertising */
+    uint16_t ci_accepted;       /* ... accepted (connection proceeds) */
+    uint16_t ci_rl_not_allowed; /* rejected: initiator disallowed by resolving list */
+    uint16_t ci_adva_bad;       /* rejected: AdvA in CONNECT_IND != ours */
+    uint16_t ci_tgta_bad;       /* rejected: InitA failed the TargetA check */
+    uint16_t ci_rx_unresolved;  /* InitA was an RPA the radio did not resolve */
+    uint16_t ar_configured;     /* AAR armed for an advertising event */
+    uint16_t ar_no_bitcount;    /* AAR skipped: RX bit counter never matched */
+    uint16_t ar_end_timeout;    /* AAR never completed (nRF54L hardware bug) */
+    uint16_t ar_notresolved;    /* AAR completed: no IRK matched */
+    uint16_t ar_resolved;       /* AAR completed: resolved to a bonded peer */
 } __attribute__((packed));
 
 /* BT_ADDR response payload: the keyboard's BLE addresses.

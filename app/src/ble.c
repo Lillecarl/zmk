@@ -938,6 +938,89 @@ static int zmk_ble_complete_startup(void) {
     return 0;
 }
 
+#if IS_ENABLED(CONFIG_SHELL)
+/* `bt_diag` shell command: on-demand dump of the controller's link-layer
+ * diagnostic counters (defined in this tree's zephyr fork -- lll_adv.c and
+ * hal/nrf5/radio/radio.c). These count CONNECT_IND accept/reject decisions
+ * and the nRF54L address-resolver (AAR) health that are otherwise invisible
+ * outside the radio ISR; the same numbers are readable over USB via factory
+ * HID (DAISY_FACTORY_CMD_BT_DIAG, `aster v1 --bt-diag`). Declared __weak so
+ * the file links against an uninstrumented controller too. */
+#include <zephyr/shell/shell.h>
+
+/* Diagnostic: is the controller's resolving list live (resolution enabled with
+ * at least one entry)? Defined by the controller (ull_filter.c); __weak here so
+ * this file also links against a build without LL privacy. Only bonds that
+ * carry a peer IRK ever reach the RL while CONFIG_BT_PRIVACY=n. Stealth
+ * advertising itself no longer depends on the RL (unlike the directed
+ * advertising it replaced), but CONNECT_IND-acceptance debugging still wants
+ * this view. */
+__weak bool ull_filter_lll_rl_enabled(void) { return false; }
+
+__weak uint32_t zmk_diag_ci_seen;
+__weak uint32_t zmk_diag_ci_accepted;
+__weak uint32_t zmk_diag_ci_rl_not_allowed;
+__weak uint32_t zmk_diag_ci_adva_bad;
+__weak uint32_t zmk_diag_ci_tgta_bad;
+__weak uint32_t zmk_diag_ci_rx_unresolved;
+__weak uint32_t zmk_diag_ci_last_rx_rl_idx = 0xff;
+__weak uint32_t zmk_diag_ci_last_lll_rl_idx = 0xff;
+__weak uint32_t zmk_diag_ar_cfg;
+__weak uint32_t zmk_diag_ar_no_bc;
+__weak uint32_t zmk_diag_ar_end_timeout;
+__weak uint32_t zmk_diag_ar_notresolved;
+__weak uint32_t zmk_diag_ar_resolved;
+
+/* Host-side bond flags feeding the controller resolving list (host/id.c
+ * zmk_diag_rl_state, TEMP patch in this tree's zephyr fork). Only bonds that
+ * carry a peer IRK ever reach the RL while CONFIG_BT_PRIVACY=n. Pairs with
+ * ull_filter_lll_rl_enabled() above. */
+__weak void zmk_diag_rl_state(const bt_addr_le_t *peer, uint8_t *entries, uint8_t *size,
+                              bool *bonded, bool *has_irk, bool *id_added, bool *id_pending) {
+    *entries = *size = 0xff;
+    *bonded = *has_irk = *id_added = *id_pending = false;
+}
+
+static int cmd_bt_diag(const struct shell *sh, size_t argc, char **argv) {
+    static const char *const adv_names[] = {"none", "stealth", "open"};
+    char addr_str[BT_ADDR_LE_STR_LEN];
+    bt_addr_le_t *peer = zmk_ble_active_profile_addr();
+    uint8_t rl_entries, rl_size;
+    bool bonded, has_irk, id_added, id_pending;
+
+    shell_print(sh, "adv: %s%s (permit_adv %d)",
+                advertising_status <= ZMK_ADV_CONN ? adv_names[advertising_status] : "?",
+                advertising_status == ZMK_ADV_STEALTH ? (stealth_adv_bursting ? " burst" : " slow")
+                                                      : "",
+                permit_adv);
+
+    bt_addr_le_to_str(peer, addr_str, sizeof(addr_str));
+    shell_print(sh, "profile %u peer: %s (connected %d)", active_profile, addr_str,
+                zmk_ble_active_profile_is_connected());
+
+    zmk_diag_rl_state(peer, &rl_entries, &rl_size, &bonded, &has_irk, &id_added, &id_pending);
+    shell_print(sh, "resolving list: lll-enabled %d entries %u/%u (host privacy %d, ctlr %d)",
+                ull_filter_lll_rl_enabled(), rl_entries, rl_size,
+                IS_ENABLED(CONFIG_BT_PRIVACY) ? 1 : 0,
+                IS_ENABLED(CONFIG_BT_CTLR_PRIVACY) ? 1 : 0);
+    shell_print(sh, "  peer bond: stored %d peer-irk %d rl-added %d rl-pending %d", bonded, has_irk,
+                id_added, id_pending);
+    shell_print(sh, "connect_ind: seen %u accepted %u", zmk_diag_ci_seen, zmk_diag_ci_accepted);
+    shell_print(sh, "  rejected: rl-not-allowed %u adva %u tgta %u (initiator-rpa-unresolved %u)",
+                zmk_diag_ci_rl_not_allowed, zmk_diag_ci_adva_bad, zmk_diag_ci_tgta_bad,
+                zmk_diag_ci_rx_unresolved);
+    shell_print(sh, "  last rl_idx: rx %u adv-target %u", zmk_diag_ci_last_rx_rl_idx,
+                zmk_diag_ci_last_lll_rl_idx);
+    shell_print(sh, "aar: configured %u no-bitcount %u end-timeout %u notresolved %u resolved %u",
+                zmk_diag_ar_cfg, zmk_diag_ar_no_bc, zmk_diag_ar_end_timeout,
+                zmk_diag_ar_notresolved, zmk_diag_ar_resolved);
+    return 0;
+}
+
+SHELL_CMD_REGISTER(bt_diag, NULL,
+                   "BLE link-layer diagnostics (CONNECT_IND acceptance, AAR health)", cmd_bt_diag);
+#endif /* IS_ENABLED(CONFIG_SHELL) */
+
 static int zmk_ble_init(void) {
     int err = bt_enable(NULL);
 
