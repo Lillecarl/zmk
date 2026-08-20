@@ -36,9 +36,10 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/split/bluetooth/uuid.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/ble_active_profile_changed.h>
+#include <zmk/events/keycode_state_changed.h>
+#include <zmk/events/activity_state_changed.h>
 
 #if IS_ENABLED(CONFIG_ZMK_BLE_PASSKEY_ENTRY)
-#include <zmk/events/keycode_state_changed.h>
 
 #define PASSKEY_DIGITS 6
 
@@ -54,20 +55,19 @@ enum advertising_type advertising_status;
 #define ZMK_ADV_CONN_NAME                                                                          \
     BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN, BT_GAP_ADV_FAST_INT_MIN_2, BT_GAP_ADV_FAST_INT_MAX_2, NULL)
 
-/* Low duty cycle directed advertising to the one host a profile is bonded to.
- *
- * BT_LE_ADV_OPT_DIR_ADDR_RPA makes the controller build TargetA from the peer's
- * IRK in the resolving list, so privacy-enabled centrals recognize the packet as
- * addressed to them. A bond without an IRK leaves an all-zero resolving list
- * entry and the controller falls back to the peer's identity address, which is
- * what a non-privacy central expects. Requires controller side LL privacy
- * (BT_FEAT_LE_PRIVACY, i.e. CONFIG_BT_CTLR_PRIVACY); without it bt_le_adv_start()
- * returns -ENOTSUP, which update_advertising() falls back to open advertising on.
+/* Reconnect ("stealth") advertising for a bonded but disconnected profile:
+ * connectable undirected ADV_IND, which every host type answers (Apple's
+ * accessory guidelines forbid directed advertising to them), carrying the
+ * non-discoverable zmk_ble_stealth_ad payload below so the keyboard stays out
+ * of everyone else's pairing UIs. Slow cadence matches the open advertisement;
+ * the burst variant runs at the LL minimum interval (0x20 * 0.625 ms = 20 ms,
+ * plus the controller's 0-10 ms advDelay) so a scanning host hears the very
+ * first packets and reconnection completes in tens of milliseconds.
  */
-#define ZMK_ADV_CONN_DIR(_peer)                                                                    \
-    BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_DIR_MODE_LOW_DUTY |                         \
-                        BT_LE_ADV_OPT_DIR_ADDR_RPA,                                                \
-                    BT_GAP_ADV_FAST_INT_MIN_2, BT_GAP_ADV_FAST_INT_MAX_2, _peer)
+#define ZMK_ADV_CONN_STEALTH_SLOW                                                                  \
+    BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN, BT_GAP_ADV_FAST_INT_MIN_2, BT_GAP_ADV_FAST_INT_MAX_2, NULL)
+
+#define ZMK_ADV_CONN_STEALTH_BURST BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN, 0x0020, 0x0020, NULL)
 
 static struct zmk_ble_profile profiles[ZMK_BLE_PROFILE_COUNT];
 static uint8_t active_profile;
@@ -88,6 +88,22 @@ static struct bt_data zmk_ble_ad[] = {
                   BT_UUID_16_ENCODE(BT_UUID_BAS_VAL)                        /* Battery Service */
                   ),
     BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
+};
+
+/* AD payload for the reconnect advertisement. GAP non-discoverable mode is the
+ * load-bearing part: with both discoverable-mode bits of the Flags AD clear,
+ * hosts' discovery procedures (Core v6.0 Vol 3 Part C 9.2) are required to
+ * hide us from pairing UIs. Everything identifying is stripped on top of that:
+ * the bonded host reconnects purely by (IRK-resolved) address and never parses
+ * this payload, so it needs no name, appearance or service UUIDs. Developer
+ * scanners see the packets regardless; the goal is pairing-UI invisibility,
+ * not RF invisibility. Design notes: ~/clone/aster/plans/reconnectable.md. */
+static const struct bt_data zmk_ble_stealth_ad[] = {
+    BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_NO_BREDR),
+#if IS_ENABLED(CONFIG_ZMK_BLE_STEALTH_ADV_NAME)
+    /* Compat hedge for hosts that mishandle nameless adverts; see Kconfig. */
+    BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN),
+#endif
 };
 
 #if IS_ENABLED(CONFIG_ZMK_SPLIT_BLE) && IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
@@ -133,11 +149,11 @@ void set_profile_address(uint8_t index, const bt_addr_le_t *addr) {
 
 /* Look up a peer's connection, but only once it is actually established.
  *
- * While directed advertising is running the host stack already holds a
- * placeholder conn object for the target peer (BT_CONN_ADV_DIR_CONNECTABLE),
- * and bt_conn_lookup_addr_le() happily returns it. Callers that mean "is this
- * host reachable" must not mistake that for a live link. Returns a referenced
- * conn (caller unrefs) or NULL.
+ * Between the controller accepting a CONNECT_IND and the connection completing
+ * (or failing) the host already holds a conn object for the peer, and
+ * bt_conn_lookup_addr_le() happily returns it. Callers that mean "is this host
+ * reachable" must not mistake that for a live link. Returns a referenced conn
+ * (caller unrefs) or NULL.
  */
 static struct bt_conn *lookup_connected_addr_le(const bt_addr_le_t *addr) {
     struct bt_conn *conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr);
@@ -177,9 +193,52 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
     return true;
 }
 
+/* The stealth advertisement on the air is the fast burst variant. Only
+ * meaningful while advertising_status == ZMK_ADV_STEALTH. */
+static bool stealth_adv_bursting;
+
+int update_advertising(void);
+
+#if IS_ENABLED(CONFIG_ZMK_BLE_STEALTH_ADV_BURST)
+
+/* Every fresh reconnect opportunity (boot with a bond, disconnect, profile
+ * switch, adv re-enable, key activity) arms a burst window: stealth
+ * advertising started while it is open runs at the 20 ms burst interval, and
+ * the slowdown work drops the advert to the slow cadence when it closes. */
+static int64_t adv_burst_until;
+/* Uptime of the last window arm, for the activity-kick cooldown. */
+static int64_t adv_burst_armed_at;
+
+static void adv_burst_arm(void) {
+    adv_burst_armed_at = k_uptime_get();
+    adv_burst_until = adv_burst_armed_at + CONFIG_ZMK_BLE_STEALTH_ADV_BURST_MS;
+}
+
+static bool adv_burst_window_open(void) { return k_uptime_get() < adv_burst_until; }
+
+/* Undirected advertising has no controller timeout, so ending the burst is on
+ * us: re-evaluate once the window closes, and update_advertising() restarts
+ * the advert at the slow cadence (the burst-state mismatch in ZMK_ADV_STEALTH
+ * + CURR_ADV(ZMK_ADV_STEALTH)). */
+static void adv_slowdown_callback(struct k_work *work) { update_advertising(); }
+static K_WORK_DELAYABLE_DEFINE(adv_slowdown_work, adv_slowdown_callback);
+
+static void adv_slowdown_schedule(void) {
+    k_work_reschedule(&adv_slowdown_work, K_MSEC(MAX(adv_burst_until - k_uptime_get(), 0)));
+}
+
+#else
+
+static void adv_burst_arm(void) {}
+static bool adv_burst_window_open(void) { return false; }
+static void adv_slowdown_schedule(void) {}
+
+#endif /* IS_ENABLED(CONFIG_ZMK_BLE_STEALTH_ADV_BURST) */
+
 #define CHECKED_ADV_STOP()                                                                         \
     err = bt_le_adv_stop();                                                                        \
     advertising_status = ZMK_ADV_NONE;                                                             \
+    stealth_adv_bursting = false;                                                                  \
     if (err) {                                                                                     \
         LOG_ERR("Failed to stop advertising (err %d)", err);                                       \
         return err;                                                                                \
@@ -193,55 +252,82 @@ bool zmk_ble_profile_is_connected(uint8_t index) {
     }                                                                                              \
     advertising_status = ZMK_ADV_CONN;
 
-/* Directed advertising carries no AD data, so zmk_ble_ad is not passed here.
- * If it cannot be started at all we fall back to open advertising: a keyboard
- * that is discoverable by everyone is bad, but one no host can reach is worse.
+/* The reconnect advertisement is peer-agnostic (undirected, nothing
+ * peer-specific in the payload), so nothing here depends on which profile is
+ * active; the lookup guard only keeps us from tearing advertising down
+ * underneath a connection that is mid-establishment. No fallback on failure:
+ * unlike directed advertising there is no exotic feature to be missing, so
+ * anything that fails this start would fail an open start the same way.
  */
-#define CHECKED_DIR_ADV()                                                                          \
+#define CHECKED_STEALTH_ADV()                                                                      \
     addr = zmk_ble_active_profile_addr();                                                          \
     conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, addr);                                            \
-    if (conn != NULL) { /* connected, or a directed-adv conn object is already pending */          \
+    if (conn != NULL) { /* connected, or a connection is being established */                      \
         LOG_DBG("Skipping advertising, profile host already has a conn object");                   \
         bt_conn_unref(conn);                                                                       \
         return 0;                                                                                  \
     }                                                                                              \
-    err = bt_le_adv_start(ZMK_ADV_CONN_DIR(addr), NULL, 0, NULL, 0);                               \
+    burst = adv_burst_window_open();                                                               \
+    err = bt_le_adv_start(burst ? ZMK_ADV_CONN_STEALTH_BURST : ZMK_ADV_CONN_STEALTH_SLOW,          \
+                          zmk_ble_stealth_ad, ARRAY_SIZE(zmk_ble_stealth_ad), NULL, 0);            \
     if (err) {                                                                                     \
-        LOG_ERR("Directed advertising failed to start (err %d), falling back to open", err);       \
-        CHECKED_OPEN_ADV();                                                                        \
-    } else {                                                                                       \
-        advertising_status = ZMK_ADV_DIR;                                                          \
+        LOG_ERR("Stealth advertising failed to start (err %d)", err);                              \
+        return err;                                                                                \
+    }                                                                                              \
+    advertising_status = ZMK_ADV_STEALTH;                                                          \
+    stealth_adv_bursting = burst;                                                                  \
+    if (burst) {                                                                                   \
+        adv_slowdown_schedule();                                                                   \
     }
 
 int update_advertising(void) {
     int err = 0;
     bt_addr_le_t *addr;
     struct bt_conn *conn;
+    bool burst;
     enum advertising_type desired_adv = ZMK_ADV_NONE;
 
     if (permit_adv && zmk_ble_active_profile_is_open()) {
         desired_adv = ZMK_ADV_CONN;
     } else if (permit_adv && !zmk_ble_active_profile_is_connected()) {
         // The profile is taken, so only its host has any business connecting.
-        // Directed advertising keeps us out of everyone else's scan results.
-        desired_adv = IS_ENABLED(CONFIG_ZMK_BLE_DIRECTED_ADV) ? ZMK_ADV_DIR : ZMK_ADV_CONN;
+        // Non-discoverable advertising keeps us out of everyone else's pairing
+        // UIs while staying connectable for the bonded host.
+        desired_adv = IS_ENABLED(CONFIG_ZMK_BLE_STEALTH_ADV) ? ZMK_ADV_STEALTH : ZMK_ADV_CONN;
     }
     LOG_DBG("advertising from %d to %d", advertising_status, desired_adv);
 
     switch (desired_adv + CURR_ADV(advertising_status)) {
-    case ZMK_ADV_NONE + CURR_ADV(ZMK_ADV_DIR):
+    case ZMK_ADV_NONE + CURR_ADV(ZMK_ADV_STEALTH):
     case ZMK_ADV_NONE + CURR_ADV(ZMK_ADV_CONN):
         CHECKED_ADV_STOP();
         break;
-    case ZMK_ADV_DIR + CURR_ADV(ZMK_ADV_DIR):
-    case ZMK_ADV_DIR + CURR_ADV(ZMK_ADV_CONN):
+    case ZMK_ADV_STEALTH + CURR_ADV(ZMK_ADV_STEALTH):
+        /* Already advertising stealth. The advert is peer-agnostic, so even a
+         * profile switch needs no restart for correctness -- only a cadence
+         * change does: the burst window closed under a bursting advert (drop
+         * to slow; the slowdown work lands here) or a fresh window was armed
+         * under a slow one (an activity kick; speed back up). With nothing to
+         * change, leave the advert strictly alone: a stop/start drops
+         * whatever CONNECT_IND is in flight and sends the host back to its
+         * (slow, duty-cycled) reconnect scan, and daisy re-affirms
+         * advertising on every USB event -- that used to tear the advert down
+         * repeatedly at exactly the moment a dongle was answering it. */
+        if (stealth_adv_bursting == adv_burst_window_open()) {
+            LOG_DBG("Already advertising stealth at the right cadence");
+            break;
+        }
         CHECKED_ADV_STOP();
-        CHECKED_DIR_ADV();
+        CHECKED_STEALTH_ADV();
         break;
-    case ZMK_ADV_DIR + CURR_ADV(ZMK_ADV_NONE):
-        CHECKED_DIR_ADV();
+    case ZMK_ADV_STEALTH + CURR_ADV(ZMK_ADV_CONN):
+        CHECKED_ADV_STOP();
+        CHECKED_STEALTH_ADV();
         break;
-    case ZMK_ADV_CONN + CURR_ADV(ZMK_ADV_DIR):
+    case ZMK_ADV_STEALTH + CURR_ADV(ZMK_ADV_NONE):
+        CHECKED_STEALTH_ADV();
+        break;
+    case ZMK_ADV_CONN + CURR_ADV(ZMK_ADV_STEALTH):
         CHECKED_ADV_STOP();
         CHECKED_OPEN_ADV();
         break;
@@ -259,8 +345,12 @@ K_WORK_DEFINE(update_advertising_work, update_advertising_callback);
 
 void zmk_ble_adv_enabled_set(bool adv_enabled) {
     if (adv_enabled) {
-        if (advertising_status != ZMK_ADV_CONN) {
+        if (!permit_adv) {
             permit_adv = true;
+            /* A genuine off->on transition (wired mode released BLE, factory
+             * mode exited) is a fresh reconnect opportunity; the re-affirming
+             * calls that arrive while already enabled are not. */
+            adv_burst_arm();
             LOG_DBG("Enabling adv");
         }
         update_advertising();
@@ -353,6 +443,7 @@ int zmk_ble_prof_select(uint8_t index) {
     active_profile = index;
     ble_save_profile();
 
+    adv_burst_arm();
     update_advertising();
 
     raise_profile_changed_event();
@@ -612,6 +703,7 @@ static void disconnected(struct bt_conn *conn, uint8_t reason) {
 
     // We need to do this in a work callback, otherwise the advertising update will still see the
     // connection for a profile as active, and not start advertising yet.
+    adv_burst_arm();
     k_work_submit(&update_advertising_work);
 
     if (is_conn_active_profile(conn)) {
@@ -801,6 +893,8 @@ static void zmk_ble_ready(int err) {
         return;
     }
 
+    /* Boot with a bond is the first reconnect opportunity. */
+    adv_burst_arm();
     update_advertising();
 }
 
@@ -945,5 +1039,48 @@ static int zmk_ble_listener(const zmk_event_t *eh) {
 ZMK_LISTENER(zmk_ble, zmk_ble_listener);
 ZMK_SUBSCRIPTION(zmk_ble, zmk_keycode_state_changed);
 #endif /* IS_ENABLED(CONFIG_ZMK_BLE_PASSKEY_ENTRY) */
+
+#if IS_ENABLED(CONFIG_ZMK_BLE_STEALTH_ADV_BURST)
+
+/* Kick a fresh burst window when the user acts on a keyboard whose active
+ * profile is bonded but disconnected -- the moment reconnect latency is
+ * actually felt. Triggers on key presses (keycode events bubble through
+ * hid_listener; position events can be truncated by keymap.c before reaching
+ * late-linked subscribers) and on the idle->active edge, which also covers
+ * pointer activity. Listener context does no BT work itself; the window is
+ * armed and the restart deferred, and the cooldown keeps typing at an absent
+ * host from bursting continuously. */
+static int adv_burst_kick_listener(const zmk_event_t *eh) {
+    const struct zmk_keycode_state_changed *kc = as_zmk_keycode_state_changed(eh);
+    const struct zmk_activity_state_changed *act = as_zmk_activity_state_changed(eh);
+
+    if ((kc == NULL || !kc->state) && (act == NULL || act->state != ZMK_ACTIVITY_ACTIVE)) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    if (!permit_adv || zmk_ble_active_profile_is_open() || zmk_ble_active_profile_is_connected() ||
+        stealth_adv_bursting ||
+        k_uptime_get() - adv_burst_armed_at < CONFIG_ZMK_BLE_STEALTH_ADV_BURST_COOLDOWN_MS) {
+        return ZMK_EV_EVENT_BUBBLE;
+    }
+
+    adv_burst_arm();
+    k_work_submit(&update_advertising_work);
+
+    return ZMK_EV_EVENT_BUBBLE;
+}
+
+ZMK_LISTENER(zmk_ble_adv_burst_kick, adv_burst_kick_listener);
+ZMK_SUBSCRIPTION(zmk_ble_adv_burst_kick, zmk_keycode_state_changed);
+ZMK_SUBSCRIPTION(zmk_ble_adv_burst_kick, zmk_activity_state_changed);
+
+#endif /* IS_ENABLED(CONFIG_ZMK_BLE_STEALTH_ADV_BURST) */
+
+uint8_t zmk_ble_adv_phase_diag(void) {
+    if (advertising_status != ZMK_ADV_STEALTH) {
+        return 0;
+    }
+    return stealth_adv_bursting ? 1 : 2;
+}
 
 SYS_INIT(zmk_ble_init, APPLICATION, CONFIG_ZMK_BLE_INIT_PRIORITY);

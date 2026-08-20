@@ -192,18 +192,65 @@ config ZMK_BLE_PASSKEY_ENTRY
     bool "Require passkey entry on the keyboard to complete pairing"
     select RING_BUFFER
 
-config ZMK_BLE_DIRECTED_ADV
-    bool "Use directed advertising for bonded profiles"
+config ZMK_BLE_STEALTH_ADV
+    bool "Use non-discoverable advertising for bonded profiles"
     default y
     help
       When the active profile is already bonded but not connected, advertise
-      directly to that one host (low duty cycle ADV_DIRECT_IND) instead of
-      sending open, generally discoverable advertisements. The keyboard then
-      only shows up in scans while the active profile is unpaired, and no
-      other host can connect to a taken profile.
+      connectable undirected (ADV_IND) but GAP non-discoverable: the Flags AD
+      has both discoverable-mode bits clear and the payload carries no name,
+      appearance or service UUIDs. Compliant pairing UIs (Windows, macOS, iOS,
+      Android, bluetoothd) are required by GAP's discovery procedures to hide
+      such adverts, so the keyboard only shows up in scan menus while the
+      active profile is unpaired -- while the bonded host, which reconnects by
+      (IRK-resolved) address and never looks at the payload, still connects.
 
-      Set to n to restore the old behavior (always undirected advertising) if
-      a host turns out not to reconnect to directed advertisements.
+      Unlike directed advertising this is Apple-compatible (their accessory
+      guidelines forbid ADV_DIRECT_IND). It does not gate who may *connect*;
+      a taken profile still rejects pairing at the SMP layer and tears down
+      links that cannot start encryption.
+
+      Set to n to restore the old behavior (always discoverable advertising)
+      if a host turns out not to reconnect to non-discoverable advertisements.
+
+config ZMK_BLE_STEALTH_ADV_NAME
+    bool "Keep the device name in non-discoverable advertisements"
+    depends on ZMK_BLE_STEALTH_ADV
+    help
+      Include the Local Name AD in the non-discoverable reconnect
+      advertisement. Bonded hosts do not need it (reconnection is
+      address-based), and it makes the packets identifiable to anyone running
+      a raw scanner, but Nordic's nRF Desktop ships name-in-stealth "for
+      backwards compatibility" -- enable this as the proven fallback if some
+      host refuses to reconnect to a nameless advertisement.
+
+config ZMK_BLE_STEALTH_ADV_BURST
+    bool "Open reconnect advertising with a fast burst"
+    depends on ZMK_BLE_STEALTH_ADV
+    default y
+    help
+      Start every fresh reconnect advertisement (boot with a bond, disconnect,
+      profile switch, adv re-enable, key activity while disconnected) at the
+      minimum advertising interval (20 ms) for a short window before settling
+      into the slow 100-150 ms cadence. A scanning host answers the first
+      packet it hears, so reconnection completes in tens of milliseconds
+      instead of several hundred.
+
+if ZMK_BLE_STEALTH_ADV_BURST
+
+config ZMK_BLE_STEALTH_ADV_BURST_MS
+    int "Fast burst window length in ms"
+    default 5000
+
+config ZMK_BLE_STEALTH_ADV_BURST_COOLDOWN_MS
+    int "Minimum ms between activity-kicked bursts"
+    default 30000
+    help
+      Key activity while the active profile is bonded but disconnected kicks a
+      fresh burst window. This cooldown bounds the radio time spent bursting
+      when the user keeps typing at a host that is not there.
+
+endif # ZMK_BLE_STEALTH_ADV_BURST
 
 config BT_SMP_ALLOW_UNAUTH_OVERWRITE
     imply ZMK_BLE_PASSKEY_ENTRY

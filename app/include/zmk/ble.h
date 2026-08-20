@@ -21,7 +21,7 @@
 
 enum advertising_type {
     ZMK_ADV_NONE,
-    ZMK_ADV_DIR,
+    ZMK_ADV_STEALTH, /* connectable but non-discoverable, for a bonded profile */
     ZMK_ADV_CONN,
 };
 
@@ -57,6 +57,10 @@ int zmk_ble_set_device_name(char *name);
 
 void zmk_ble_adv_enabled_set(bool adv_enabled);
 bool zmk_ble_adv_enabled_get(void);
+
+/* Diagnostic view of the reconnect-advertising cadence: 0 when not advertising
+ * stealth, 1 during the fast burst window, 2 at the slow fallback interval. */
+uint8_t zmk_ble_adv_phase_diag(void);
 
 /* Relay a passkey to a pending passkey-entry pairing (see ble.c). Returns 0 on
  * success, -ENOTSUP if passkey entry isn't built in, -ENOTCONN if nothing is
