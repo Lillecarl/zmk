@@ -13,6 +13,15 @@
 #include <zmk/behavior.h>
 #include <zmk/ble.h>
 
+#include "protocol_switch.h"
+
+#if IS_ENABLED(CONFIG_DAISY_FACTORY)
+#include "factory_state.h"
+#else
+/* No factory interface built -> factory mode can never be active. */
+static inline bool daisy_factory_mode_active(void) { return false; }
+#endif
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
@@ -21,19 +30,23 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
  * the `buttons_input` direct-GPIO device), wrapped in the `pairing_ht`
  * hold-tap: tap = next BLE profile, hold 1 s = clear the active profile's bond.
  *
- * Unlike `&bt BT_NXT` / `&bt BT_CLR` it is inert while BLE is off, i.e. while
- * the protocol switch sits in the WIRED position (protocol_switch.c calls
- * `zmk_ble_adv_enabled_set(false)` there, which stops advertising and drops
- * every link). Without that gate the button still switched the active profile
- * behind the user's back -- a settings write -- and, held, silently wiped the
- * bond of a keyboard that is deliberately cabled-only.
+ * Unlike `&bt BT_NXT` / `&bt BT_CLR` it is inert while the protocol switch
+ * sits in the WIRED position. Without that gate the button still switched the
+ * active profile behind the user's back -- a settings write -- and, held,
+ * silently wiped the bond of a keyboard that is deliberately cabled-only.
  *
- * The gate reads `zmk_ble_adv_enabled_get()` rather than the switch GPIO on
- * purpose: it is the same "BLE off" signal pairing_leds.c blanks the four
- * pairing LEDs on, so a dark LED strip and a dead pairing button always agree,
- * and `aster --bt-adv-off` is covered too. It also leaves the button live for
- * factory pairing tests, where apply_policy() is skipped and advertising stays
- * permitted regardless of the switch.
+ * The gate reads the switch position (protocol_switch.h) rather than
+ * `zmk_ble_adv_enabled_get()`: the switch is what the user physically sees, so
+ * the button's liveness tracks the thing they just flipped, and it stays live
+ * when advertising is off for some unrelated reason (`aster --bt-adv-off`, a
+ * host-initiated stop) -- pressing it is then a reasonable way to ask for
+ * pairing back. Factory pairing tests are covered too: apply_policy() is
+ * skipped in factory mode, so the button stays live there regardless of the
+ * switch.
+ *
+ * Note this no longer matches pairing_leds.c exactly, which still blanks on
+ * `zmk_ble_adv_enabled_get()`: with the switch wireless but advertising
+ * suppressed the LEDs are dark while the button works.
  */
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
@@ -45,8 +58,8 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 static int on_keymap_binding_pressed(struct zmk_behavior_binding *binding,
                                      struct zmk_behavior_binding_event event) {
 #if IS_ENABLED(CONFIG_ZMK_BLE)
-    if (!zmk_ble_adv_enabled_get()) {
-        LOG_INF("pairing button ignored: BLE is off (wired mode)");
+    if (!daisy_protocol_switch_is_wireless() && !daisy_factory_mode_active()) {
+        LOG_INF("pairing button ignored: protocol switch is in the wired position");
         return ZMK_BEHAVIOR_OPAQUE;
     }
 

@@ -12,6 +12,8 @@
 #include <zmk/events/usb_conn_state_changed.h>
 #include <zmk/usb.h>
 
+#include "protocol_switch.h"
+
 #if IS_ENABLED(CONFIG_DAISY_FACTORY)
 #include "factory_state.h"
 #else
@@ -70,6 +72,8 @@ static struct k_work_q pq;
 
 enum mode { MODE_WIRED, MODE_WIRELESS };
 static enum mode current_mode = MODE_WIRED; /* replaced by the real reading at init */
+
+bool daisy_protocol_switch_is_wireless(void) { return current_mode == MODE_WIRELESS; }
 
 static bool read_switch_wireless(void) {
     int lvl = gpio_pin_get_dt(&protocol_switch);
