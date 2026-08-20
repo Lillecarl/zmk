@@ -1297,15 +1297,36 @@ static uint8_t pert_hfxo_prewarm(void) {
     k_sem_init(&pert_hfxo_sem, 0, 1);
     for (int attempt = 0; attempt < 2; attempt++) {
         sys_notify_init_callback(&pert_hfxo_cli.notify, pert_hfxo_ready);
+
+        /* Requested with interrupts locked and HF_USER_BT freshly set, so
+         * generic_hfclk_start() (clock_control_nrf.c:374) is guaranteed to
+         * observe the crystal as already started and notify synchronously.
+         *
+         * Without the lock the link layer can clear HF_USER_BT in between --
+         * it releases the BT user at the end of every radio event -- and the
+         * generic start then falls through to waiting on an XOSTARTED event,
+         * which the hardware does not produce for an XO that is already
+         * running. The request is accepted and simply never completes, which
+         * is the "grant not signalled" failure. Same trap as the RF path's
+         * HFXO wait; see rf_clock_init() in factory_rf.c. */
+        unsigned int key = irq_lock();
+        z_nrf_clock_bt_ctlr_hf_request();
         int err = onoff_request(mgr, &pert_hfxo_cli);
+        irq_unlock(key);
+
         if (err >= 0) {
             if (k_sem_take(&pert_hfxo_sem, K_MSEC(100)) == 0) {
                 pert_hfxo_granted = true;
                 LOG_INF("pert: HFXO running, generic grant held");
                 return DAISY_FACTORY_OK;
             }
-            LOG_ERR("pert: HF clock grant not signalled");
-            return DAISY_FACTORY_ERR_HW;
+            (void)nrfx_clock_is_running(NRF_CLOCK_DOMAIN_HFCLK, &type);
+            LOG_ERR("pert: HF clock grant not signalled (high_acc=%d onoff_err=%d)",
+                    type == NRF_CLOCK_HFCLK_HIGH_ACCURACY, onoff_has_error(mgr));
+            /* Drop the client that never completed before trying again;
+             * leaving it registered would corrupt the manager's client list. */
+            (void)onoff_cancel(mgr, &pert_hfxo_cli);
+            continue;
         }
         LOG_WRN("pert: HF onoff request failed (%d), resetting the service", err);
         sys_notify_init_callback(&pert_hfxo_cli.notify, pert_hfxo_ready);
