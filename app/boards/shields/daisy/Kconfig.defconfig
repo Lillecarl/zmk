@@ -49,6 +49,20 @@ config RADIO_TEST_RX_TIMEOUT
       radio. Carried over from the radio_test sample's Kconfig, which the
       vendored driver in rf/ still reads.
 
+config DAISY_CHARGE_TIMEOUT_RECOVERY
+    bool "Recover from nPM1300 charge safety-timer expiry"
+    default y
+    help
+      The nPM1300 charge safety timer (~7 h) is shorter than a full 0.2C
+      charge of the pack (~7.3 h), so every deep charge latches a
+      CHARGETIMEOUT error at ~93-95% SOC and stops until a VBUS replug.
+      This module polls the charger while USB-powered and, when that error
+      latches, clears it and re-enables charging (the datasheet-documented
+      recovery), bounded by a 12 h active-charging budget per plug-in so a
+      degenerate cell still latches off. Set to n to reproduce the raw
+      latch behavior for lab A/B testing. See
+      aster/issues/charge-stops-early-safety-timer.md.
+
 config ZMK_KEYBOARD_NAME
     # TODO: Full name (Current limit is 16 - BT_DEVICE_NAME_MAX)
     #        1234567890123456
