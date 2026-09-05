@@ -17,9 +17,12 @@ Phases:
               the same value at probe).
   3 input     Interactive: you move/tap fingers on the pad while the raw
               hidraw stream and all evdev nodes are captured in parallel.
-              Reports: rate, inter-report jitter, PTP scan-time vs host
-              clock drift, dropped-frame estimate, X/Y coverage, contact
-              count, and whether hid-multitouch turned it into evdev events.
+              Reports: rate, inter-report jitter, arrival-delta histogram
+              and regularity (flags a periodic beat such as 15/7.5/7.5 ms =
+              firmware pacing vs BLE connection interval), PTP scan-time vs
+              host clock drift, dropped-vs-coalesced-frame estimate, X/Y
+              coverage, contact count, and whether hid-multitouch turned it
+              into evdev events.
   4 ble       (--ble) repeat 2+3 against the Bluetooth HOGP hid device,
               so USB and BLE timings can be compared.
 
@@ -32,7 +35,9 @@ Typical usage:
   sudo ./test_touchpad.py                # full USB run (asks you to touch)
   sudo ./test_touchpad.py --quick        # enum + features only, no interaction
   sudo ./test_touchpad.py --ble          # also test the BLE transport
-  sudo ./test_touchpad.py --watch        # live parsed report stream (^C ends)
+  sudo ./test_touchpad.py --watch        # live parsed report stream (^C ends
+                                         # with an arrival-delta summary)
+  sudo ./test_touchpad.py --dongle --watch   # same via the USB-A BT dongle
   sudo ./test_touchpad.py --record m.jsonl --json result.json
 
 hidraw access needs root (the script re-execs itself with sudo if needed;
@@ -296,6 +301,85 @@ def stats_line(vals_ms):
             f"avg {statistics.mean(vals_ms):.2f} / max {max(vals_ms):.2f} ms")
 
 
+def delta_histogram(vals_ms, bin_ms=1.0, max_ms=40.0, min_frac=0.02):
+    """One-line histogram of inter-arrival deltas in 1 ms bins (>= max lumped);
+    bins under min_frac of the samples are omitted to keep the line short."""
+    if not vals_ms:
+        return "n/a"
+    bins = {}
+    cap = int(max_ms // bin_ms)
+    for v in vals_ms:
+        b = min(int(v // bin_ms), cap)
+        bins[b] = bins.get(b, 0) + 1
+    n = len(vals_ms)
+    parts = []
+    for b in sorted(bins):
+        if bins[b] / n < min_frac:
+            continue
+        lo = b * bin_ms
+        label = f">={max_ms:.0f}" if b >= cap else f"{lo:.0f}-{lo + bin_ms:.0f}"
+        parts.append(f"{label}ms:{100 * bins[b] / n:.0f}%")
+    return "  ".join(parts)
+
+
+def arrival_regularity(deltas_ms):
+    """Classify inter-arrival deltas: the fraction well above the median
+    ("long") and well below it ("burst"), and whether the long ones recur
+    with a short fixed period (a beat).
+
+    A sample-and-hold pacer running at one interval on top of a link that
+    delivers on another produces exactly such a beat: 10 ms pacing on a
+    7.5 ms BLE connection interval gives 15/7.5/7.5 ms, period 30 ms
+    (aster/issues/touchpad-ble-pacing-beat.md). Genuine loss or a stalled
+    reader gives long gaps at random positions instead."""
+    out = {"n": len(deltas_ms)}
+    if len(deltas_ms) < 20:
+        return out
+    med = statistics.median(deltas_ms)
+    long_idx = [i for i, d in enumerate(deltas_ms) if d > 1.5 * med]
+    short_idx = [i for i, d in enumerate(deltas_ms) if d < 0.5 * med]
+    out.update(median_ms=med,
+               long_frac=len(long_idx) / len(deltas_ms),
+               burst_frac=len(short_idx) / len(deltas_ms))
+    # >=20% of deltas far below the median = frames queued upstream and
+    # delivered in clumps (pre-pacing BLE: two frames ~50 us apart per 15 ms
+    # event). That is bursting, not a pacing beat, even though it is periodic.
+    out["bursty"] = out["burst_frac"] >= 0.20
+    if len(long_idx) >= 5 and not out["bursty"]:
+        cycles = [b - a for a, b in zip(long_idx, long_idx[1:])]
+        cyc = statistics.median(cycles)
+        consistency = sum(1 for c in cycles if abs(c - cyc) <= 1) / len(cycles)
+        if cyc <= 8 and consistency >= 0.6:
+            period = statistics.median(
+                sum(deltas_ms[a:b]) for a, b in zip(long_idx, long_idx[1:]))
+            out["beat"] = {"every_n": cyc, "period_ms": period,
+                           "consistency": consistency}
+    return out
+
+
+def regularity_summary(reg):
+    """Human-readable one-liner for arrival_regularity() output."""
+    if "long_frac" not in reg:
+        return f"too few samples ({reg['n']}) for a regularity verdict"
+    s = (f"{reg['long_frac'] * 100:.0f}% of deltas > 1.5x median "
+         f"({reg['median_ms']:.1f}ms), {reg['burst_frac'] * 100:.0f}% < 0.5x")
+    if reg.get("bursty"):
+        s += "; BURSTY: frames arrive in clumps (queued upstream, link-paced)"
+    beat = reg.get("beat")
+    if beat:
+        s += (f"; BEAT: one long gap every {beat['every_n']:.0f} arrivals, "
+              f"period {beat['period_ms']:.1f}ms "
+              f"({beat['consistency'] * 100:.0f}% consistent)")
+    return s
+
+
+BEAT_HINT = ("periodic beat = sample-and-hold pacing at one interval delivered "
+             "on a link with another interval (hid_passthrough_ble.c TP_PACE_MS "
+             "= 10 ms vs the granted BLE connection interval, 7.5 ms on both "
+             "the dongle and BlueZ). Frames are coalesced, not lost. See "
+             "aster/issues/touchpad-ble-pacing-beat.md")
+
+
 # ---------------------------------------------------------------- parsing
 
 def s8(b):
@@ -462,6 +546,19 @@ def analyze_motion(cap, rep, res_prefix):
                   f"{overall:.1f} Hz overall ({burst:.0f} Hz within bursts)",
                   warn_only=True)
 
+        # Arrival regularity: min/med/max hide a 15/7.5/7.5 ms beat (median
+        # 7.5, max 15, looks fine) that the cursor feels as unevenness.
+        rep.info(f"host arrival histogram: {delta_histogram(jitter)}")
+        reg = arrival_regularity(jitter)
+        out["arrival_regularity"] = reg
+        beat = reg.get("beat")
+        if "long_frac" in reg:
+            rep.check("arrival intervals regular (<10% of deltas >1.5x median)",
+                      reg["long_frac"] < 0.10, regularity_summary(reg),
+                      warn_only=True)
+            if beat:
+                rep.info(C.c(C.Y, BEAT_HINT))
+
         # device-side timeline: scan time (100 us units)
         scans = unwrap_scan_times([f["scan_time"] for _, f in ptp])
         sdeltas = [(b - a) * SCAN_TIME_UNIT_S for a, b in zip(scans, scans[1:])]
@@ -474,9 +571,17 @@ def analyze_motion(cap, rep, res_prefix):
                      f"gaps>1.75×med: {drops}, duplicates: {dups}")
             out["scan_med_ms"] = med * 1e3
             out["frame_gaps"] = drops
+            # With an arrival beat, the same ~1-in-N scan-time gaps are frames
+            # the firmware pacer COALESCED (the sent frame carries two pad
+            # frames of travel), not frames lost in transit.
+            coalesced = bool(beat) and drops > len(pos) * 0.10
+            out["frames_coalesced"] = coalesced
             rep.check("dropped-frame estimate < 2%",
                       drops <= max(1, len(pos) * 0.02),
-                      f"{drops}/{len(pos)} scan-time gaps", warn_only=True)
+                      f"{drops}/{len(pos)} scan-time gaps"
+                      + (" — line up with the arrival beat: COALESCED by "
+                         "firmware pacing, not dropped" if coalesced else ""),
+                      warn_only=True)
             # compare device pacing vs host arrival pacing
             host_med = statistics.median(all_deltas) if all_deltas else 0
             if host_med > 0.05:
@@ -862,18 +967,21 @@ def watch(tp):
     print(f"watching {tp.hidraw} ({tp.name}) — ^C to stop", flush=True)
     fd = os.open(tp.hidraw, os.O_RDONLY)
     last_t, last_scan = None, None
+    host_deltas, scan_deltas = [], []  # PTP frames only, ms
     try:
         while True:
             data = os.read(fd, 4096)
             t = time.monotonic()
             dt = f"{(t - last_t) * 1e3:7.2f}ms" if last_t else "        "
-            last_t = t
             rid, p = data[0], data[1:]
             if rid == PTP_ID and (f := parse_ptp(p)):
+                if last_t is not None:
+                    host_deltas.append((t - last_t) * 1e3)
                 sdt = ""
                 if last_scan is not None:
                     d = (f["scan_time"] - last_scan) & 0xFFFF
                     sdt = f" scan+{d * SCAN_TIME_UNIT_S * 1e3:6.2f}ms"
+                    scan_deltas.append(d * SCAN_TIME_UNIT_S * 1e3)
                 last_scan = f["scan_time"]
                 tips = [(fg["cid"], fg["x"], fg["y"])
                         for fg in f["fingers"] if fg["tip"]]
@@ -884,10 +992,33 @@ def watch(tp):
                       f"dy={m['dy']} wheel={m['wheel']} pan={m['pan']}")
             else:
                 print(f"{dt} id=0x{rid:02x} {p.hex()}")
+            last_t = t
     except KeyboardInterrupt:
         print()
     finally:
         os.close(fd)
+    # Summary: reproduces a libinput debug-events "7 ms / 15 ms alternation"
+    # report without libinput, and separates pad timing from delivery timing.
+    cont = [d for d in host_deltas if d < 100]  # drop lift-off pauses
+    if len(cont) >= 20:
+        print(f"PTP host arrival ({len(cont)} deltas): {stats_line(cont)}")
+        print(f"  histogram: {delta_histogram(cont)}")
+        reg = arrival_regularity(cont)
+        print(f"  regularity: {regularity_summary(reg)}")
+        if reg.get("beat"):
+            print(C.c(C.Y, f"  {BEAT_HINT}"))
+        scont = [d for d in scan_deltas if 0 < d < 100]
+        if scont:
+            med = statistics.median(scont)
+            dbl = sum(1 for d in scont if d > 1.75 * med)
+            print(f"pad scan-time delta: med {med:.2f}ms "
+                  f"({1000 / med:.0f} Hz at the pad); {dbl}/{len(scont)} "
+                  f"deltas >1.75x median ({100 * dbl / len(scont):.0f}%) = "
+                  f"frames coalesced or lost before reaching the host")
+            print(f"  histogram: {delta_histogram(scont)}")
+    elif host_deltas:
+        print(f"({len(host_deltas)} PTP frames — keep a finger moving for a "
+              f"few seconds for the arrival summary)")
 
 
 # ---------------------------------------------------------------- gain
@@ -1077,6 +1208,9 @@ def diagnose(rep):
     def failed(sub):
         return any(sub in name for _, name, st, _ in rep.checks if st == "fail")
 
+    def warned(sub):
+        return any(sub in name for _, name, st, _ in rep.checks if st == "warn")
+
     verdict = []
     if failed("USB device 32ac:0034"):
         verdict.append("Device not on the bus at all: cable/power, or the known "
@@ -1125,6 +1259,20 @@ def diagnose(rep):
         verdict.append("hid-generic grabbed the TP interface: descriptor doesn't "
                        "look like a win8 PTP to the kernel, or hid-multitouch not "
                        "loaded (modprobe hid-multitouch).")
+    elif not fails and warned("arrival intervals regular"):
+        verdict.append("All layers deliver, but frames arrive on an uneven grid "
+                       "(see 'arrival intervals regular' + histogram above). A "
+                       "periodic beat (e.g. 15/7.5/7.5 ms) is the firmware's "
+                       "fixed 10 ms PTP pacing (hid_passthrough_ble.c "
+                       "TP_PACE_MS) beating against the granted BLE connection "
+                       "interval (7.5 ms on the dongle and BlueZ); the cursor "
+                       "feels less smooth than a steady-rate pad. Control: the "
+                       "keyboard's own USB-C interface is unpaced and should "
+                       "show one histogram peak. Fix: pace to the granted "
+                       "connection interval — aster/issues/"
+                       "touchpad-ble-pacing-beat.md. Random long gaps instead "
+                       "of a beat = a stalled reader or lost frames (RTT: 'TX "
+                       "buffer still in flight').")
     elif not fails:
         verdict.append("All layers pass — communication looks healthy. If gestures "
                        "still misbehave, next layer up is libinput: "
@@ -1262,6 +1410,12 @@ def lag_probe(args):
         burst = sum(1 for d in adel if d < med / 2)
         print(f"  arrival deltas: median {med:.1f} ms, p95 {p95:.1f} ms, "
               f"max {adel[-1]:.1f} ms")
+        raw_deltas = [(b - a) * 1000 for a, b in zip(arrivals, arrivals[1:])]
+        print(f"  histogram: {delta_histogram(raw_deltas)}")
+        reg = arrival_regularity(raw_deltas)
+        print(f"  regularity: {regularity_summary(reg)}")
+        if reg.get("beat"):
+            print(C.c(C.Y, f"  !! {BEAT_HINT}"))
         if p95 > 4 * med:
             print(C.c(C.Y, f"  !! BURSTY delivery ({burst} tight pairs): frames "
                            "queue upstream and arrive in clumps -> BLE link "
