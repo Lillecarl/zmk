@@ -1,3 +1,5 @@
+#include <dt-bindings/i2c/i2c.h>
+
 / {
     chosen {
         zmk,keyboard-hid = &hid_dev_0;
@@ -94,6 +96,9 @@
 };
 
 &i2c22 {
+    /* 400kHz clock-rate - max what the touchpad supports */
+    clock-frequency = <I2C_BITRATE_FAST>;
+
     touchpad: touchpad@2c {
         #include "../daisy-touchpad.dtsi"
         dr-gpios = <&gpio3 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
