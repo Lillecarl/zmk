@@ -10,7 +10,9 @@
         label = "HID0";
         protocol-code = "keyboard";
         in-report-size = <64>;
-        in-polling-period-us = <1000>;
+        /* 125 us = bInterval 1 at high speed (8 kHz polling). The FS
+         * descriptor set clamps to 1 ms (the FS protocol minimum). */
+        in-polling-period-us = <125>;
     };
 
     /* Layout strap GPIOs (read at boot to detect ANSI/ISO/JIS). */
