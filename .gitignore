@@ -6,6 +6,7 @@
 /zephyr
 /zmk-config
 /build
+/build-*
 
 # macOS
 *.DS_Store
