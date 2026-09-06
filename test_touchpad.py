@@ -47,6 +47,7 @@ hidraw access needs root (the script re-execs itself with sudo if needed;
 import argparse
 import fcntl
 import json
+import math
 import os
 import re
 import select
@@ -117,6 +118,35 @@ def hidraw_set_feature(fd, report_id, payload):
     t0 = time.monotonic()
     fcntl.ioctl(fd, _ioc(3, 0x06, len(buf)), buf, True)  # HIDIOCSFEATURE
     return time.monotonic() - t0
+
+
+# EVIOCSCLOCKID: switch an evdev node's event timestamps to a chosen clock.
+EVIOCSCLOCKID = (1 << 30) | (4 << 16) | (ord("E") << 8) | 0xA0
+CLOCK_MONOTONIC = 1
+
+_dma_latency_fd = None
+
+
+def pin_cstates():
+    """Hold /dev/cpu_dma_latency at 0 for the process lifetime (the
+    cyclictest trick): deep C-state exit latency otherwise adds ~+-130 us --
+    occasionally ms -- to IRQ stamping and process wakeups, the same order as
+    the arrival structures measured here (test_polling.py found it hiding the
+    USB polling grid entirely). Root only; memoized, warns once."""
+    global _dma_latency_fd
+    if _dma_latency_fd is not None:
+        return
+    try:
+        f = open("/dev/cpu_dma_latency", "wb", buffering=0)
+        f.write(struct.pack("<I", 0))
+        _dma_latency_fd = f
+        print(C.c(C.DIM, "  (C-states pinned shallow via /dev/cpu_dma_latency"
+                         " for low-jitter timing)"))
+    except OSError:
+        _dma_latency_fd = False
+        print(C.c(C.Y, "  WARNING: no /dev/cpu_dma_latency access (not "
+                       "root?) -- timing stats include deep C-state wakeup "
+                       "jitter (~100 us spikes)"))
 
 
 # ---------------------------------------------------------------- discovery
@@ -373,6 +403,77 @@ def regularity_summary(reg):
     return s
 
 
+# --- delivery-grid detection (same method as test_polling.py) -------------
+#
+# Reports on an interrupt endpoint are handed over only when the host polls
+# (USB) or on a connection event (BLE), so kernel-stamped arrival gaps are
+# multiples of that quantum. Score each candidate with the zero-phase cosine
+# concentration C(g): value clusters (steady ~8 ms pad cadence!) concentrate
+# at an ARBITRARY phase modulo coarse grids and cancel in the signed cosine;
+# true grid multiples (residues at 0) score ~1. Coarsest candidate within
+# 90% of the best wins (multiples of 1 ms tie on all divisors of 1000).
+
+GRID_CANDIDATES_US = [30_000, 15_000, 11_250, 7_500, 1000, 500, 250, 125]
+GRID_MAX_DELTA_US = 200_000  # SOF-vs-kernel clock drift smears longer gaps
+
+
+def grid_C(deltas_us, g):
+    return sum(math.cos(2 * math.pi * (d % g) / g) for d in deltas_us) \
+        / len(deltas_us)
+
+
+def delivery_grid(arrival_ts_s):
+    """Grid verdict for kernel-stamped frame-arrival times (seconds), or
+    None when there's not enough data."""
+    deltas = [(b - a) * 1e6 for a, b in zip(arrival_ts_s, arrival_ts_s[1:])]
+    usable = [d for d in deltas if 0 < d <= GRID_MAX_DELTA_US]
+    n = len(usable)
+    if n < 30:
+        return None
+    crit = max(0.15, 3.72 / math.sqrt(n))  # Rayleigh p ~ 1e-6 floor
+    cs = {g: grid_C(usable, g) for g in GRID_CANDIDATES_US}
+    best = max(cs.values())
+    out = {"n": n, "C": {g: round(c, 3) for g, c in cs.items()},
+           "C_crit": round(crit, 3)}
+    if best < crit:
+        out["verdict"] = "no delivery grid visible"
+        return out
+
+    # Diversity gate: the pad's metronomic ~8 ms cadence is a single-valued
+    # delta cluster, and one repeated value is consistent with EVERY grid
+    # near a divisor of it (8000 us sits at phase 24 deg mod 7500 -> C 0.91,
+    # a fake "BLE interval" on USB data). A real grid claim needs deltas
+    # spanning >= 2 distinct multiples of the candidate, each with real mass.
+    def diverse(g):
+        counts = {}
+        for d in usable:
+            k = round(d / g)
+            counts[k] = counts.get(k, 0) + 1
+        floor = max(2, 0.05 * n)
+        return sum(1 for c in counts.values() if c >= floor) >= 2
+
+    qualified = [g for g in GRID_CANDIDATES_US
+                 if cs[g] >= crit and diverse(g)]
+    if not qualified:
+        med = statistics.median(usable)
+        out["verdict"] = (f"ambiguous: cadence too uniform (single ~"
+                          f"{med:.0f} us gap) to resolve its grid -- "
+                          "recapture with brief lift-offs/taps mixed in to "
+                          "diversify the gaps")
+        return out
+    best_q = max(cs[g] for g in qualified)
+    grid = next(g for g in qualified if cs[g] >= max(crit, 0.9 * best_q))
+    sigma_d = (grid / math.pi) * math.sqrt(max(math.log(1 / cs[grid]), 0) / 2)
+    out.update(grid_us=grid, stamp_jitter_us=round(sigma_d / math.sqrt(2), 1))
+    if grid <= 1000:
+        out["verdict"] = (f"USB polling grid {grid} us "
+                          f"({1000 // grid} kHz endpoint polling)")
+    else:
+        out["verdict"] = (f"{grid / 1000:g} ms grid -- BLE connection "
+                          "interval (what the central actually granted)")
+    return out
+
+
 BEAT_HINT = ("periodic beat = sample-and-hold pacing at one interval delivered "
              "on a link with another interval (hid_passthrough_ble.c TP_PACE_MS "
              "= 10 ms vs the granted BLE connection interval, 7.5 ms on both "
@@ -420,6 +521,7 @@ class Capture:
         self.extra_nodes = extra_nodes or []  # [(path, label)] e.g. keyboard evdev
         self.hid_events = []    # (t_mono, report_id, payload bytes)
         self.evdev_events = {}  # node -> [(t_mono, type, code, value)]
+        self.kernel_ts = set()  # evdev nodes whose stamps are kernel-side
         self.t_start = self.t_end = None
         self._fds = {}
 
@@ -431,6 +533,15 @@ class Capture:
                 efd = os.open(node, os.O_RDONLY | os.O_NONBLOCK)
                 self._fds[efd] = ("evdev", node)
                 self.evdev_events[node] = []
+                # Kernel-stamped events on the same clock as our monotonic
+                # hidraw stamps; nodes where this fails keep userspace stamps
+                # (kernel default is CLOCK_REALTIME -- wrong clock domain).
+                try:
+                    fcntl.ioctl(efd, EVIOCSCLOCKID,
+                                struct.pack("i", CLOCK_MONOTONIC))
+                    self.kernel_ts.add(node)
+                except OSError:
+                    pass
             except OSError as e:
                 print(f"  {C.c(C.DIM, f'(cannot open {node}: {e.strerror})')}")
         self._drain()
@@ -477,11 +588,15 @@ class Capture:
                                 "t": t, "src": f"hidraw{self.tag}",
                                 "id": data[0], "data": data[1:].hex()}) + "\n")
                 else:
+                    kernel = node in self.kernel_ts
                     for off in range(0, len(data) - EVDEV_EVENT_SIZE + 1,
                                      EVDEV_EVENT_SIZE):
-                        _s, _u, etype, code, value = struct.unpack_from(
+                        s, u, etype, code, value = struct.unpack_from(
                             EVDEV_EVENT_FMT, data, off)
-                        self.evdev_events[node].append((t, etype, code, value))
+                        # Kernel stamp (us resolution, taken at URB
+                        # completion) beats our post-read userspace stamp.
+                        te = s + u / 1e6 if kernel else t
+                        self.evdev_events[node].append((te, etype, code, value))
         self.t_end = time.monotonic()
         if progress:
             print("\r" + " " * 60 + "\r", end="")
@@ -634,6 +749,26 @@ def analyze_motion(cap, rep, res_prefix):
                   "issue (check hid-recorder + hid-multitouch quirks)"
                   if cap.hid_events and not mt_nodes else ", ".join(mt_nodes))
     out["evdev_counts"] = total_ev
+
+    # Delivery grid from kernel-stamped evdev frame boundaries (SYN_REPORT):
+    # over USB this reads the endpoint's actual polling rate off the wire;
+    # over BLE it reads the granted connection interval directly.
+    if mt_nodes:
+        node = mt_nodes[0]
+        syn_ts = sorted({t for t, etype, code, _v in cap.evdev_events[node]
+                         if etype == EV_SYN and code == 0})
+        grid = delivery_grid(syn_ts)
+        if grid:
+            caveat = ("" if node in cap.kernel_ts else
+                      " [userspace-stamped: EVIOCSCLOCKID failed, "
+                      "grid/jitter unreliable]")
+            detail = ""
+            if "grid_us" in grid:
+                detail = (f" (C={grid['C'][grid['grid_us']]:.2f}, "
+                          f"jitter ~{grid['stamp_jitter_us']} us, "
+                          f"n={grid['n']})")
+            rep.info(f"delivery grid: {grid['verdict']}{detail}{caveat}")
+            out["delivery_grid"] = grid
     rep.data[res_prefix] = out
     return out
 
@@ -921,6 +1056,7 @@ def phase_input(rep, tp, args, tag, record_fh):
         rep.check("open hidraw for reading", False, "permission denied")
         return
 
+    pin_cstates()
     if ask(f"MOTION: move ONE finger in circles over the WHOLE pad for "
            f"{args.duration}s, without lifting"):
         with Capture(tp, record_fh, tag) as cap:
@@ -1001,6 +1137,9 @@ def watch(tp):
     # report without libinput, and separates pad timing from delivery timing.
     cont = [d for d in host_deltas if d < 100]  # drop lift-off pauses
     if len(cont) >= 20:
+        print("(watch stamps arrivals in userspace after printing each line "
+              "-- ms-scale stats only; run the motion phase for kernel-"
+              "stamped grid/jitter numbers)")
         print(f"PTP host arrival ({len(cont)} deltas): {stats_line(cont)}")
         print(f"  histogram: {delta_histogram(cont)}")
         reg = arrival_regularity(cont)
@@ -1094,6 +1233,7 @@ def gain_mode(args):
         sys.exit("no daisy touchpad devices found")
     if os.geteuid() != 0 and not args.no_sudo and sys.stdin.isatty():
         os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
+    pin_cstates()
 
     print("gain measurement targets:")
     for t in targets:
@@ -1512,6 +1652,7 @@ def main():
         if not os.access(devs[0].hidraw, os.R_OK) and os.geteuid() != 0 \
                 and not args.no_sudo and sys.stdin.isatty():
             os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
+        pin_cstates()
         watch(devs[0])
         return 0
 
