@@ -45,6 +45,7 @@ completion times.
 
 import argparse
 import json
+import math
 import statistics
 import struct
 import subprocess
@@ -64,7 +65,6 @@ DEFAULT_ASTER = Path.home() / "clone/aster/target/debug/aster"
 
 GRID_US = 125          # finest hypothesis: HS microframe
 FRAME_US = 1000        # FS frame / coarse hypothesis
-TOL_US = 40            # |residue| tolerance: URB-completion stamping jitter
 
 
 # ---------------------------------------------------------------------------
@@ -152,10 +152,23 @@ def arrivals(events, code=None):
     return ts
 
 
-def fold(residue, grid):
-    """Fold a modulo residue to [-grid/2, +grid/2)."""
-    r = residue % grid
-    return r - grid if r >= grid / 2 else r
+# Candidate grids, coarsest first. The verdict is the COARSEST significant
+# one: a 1 kHz stream also concentrates mod 125 us (1000 is a multiple of
+# 125), but an 8 kHz stream does NOT concentrate mod 1000 (random-phase
+# sources populate all 8 microframe slots, whose phases cancel) -- so
+# coarsest-significant is exactly the "GCD of the deltas", jitter-robustly.
+# The coarse entries catch BLE connection intervals masquerading as USB.
+CANDIDATES_US = [30_000, 15_000, 11_250, 7_500, 1000, 500, 250, 125]
+
+
+def circ_R(deltas, g):
+    """Circular concentration of deltas modulo grid g: 1.0 = perfectly on
+    grid, ~1/sqrt(n) = no relation to g (Rayleigh). Tolerance-free -- a grid
+    smeared by timestamp jitter shows a reduced but still significant R
+    instead of falling off a hard threshold cliff."""
+    re = sum(math.cos(2 * math.pi * (d % g) / g) for d in deltas)
+    im = sum(math.sin(2 * math.pi * (d % g) / g) for d in deltas)
+    return math.hypot(re, im) / len(deltas)
 
 
 def analyze(ts, max_delta_us):
@@ -167,48 +180,47 @@ def analyze(ts, max_delta_us):
         "deltas_used": len(usable),
         "min_delta_us": min(deltas) if deltas else None,
     }
-    if len(usable) < 30:
+    n = len(usable)
+    if n < 30:
         out["verdict"] = "not enough data"
         return out
 
-    bins = [0] * (FRAME_US // GRID_US)  # residue mod 1ms -> 8 x 125us bins
-    on125 = on1000 = 0
+    # Display histogram: every usable delta folded mod 1 ms into 125 us bins.
+    bins = [0] * (FRAME_US // GRID_US)
     for d in usable:
-        r125 = fold(d, GRID_US)
-        r1000 = fold(d, FRAME_US)
-        if abs(r125) <= TOL_US:
-            on125 += 1
-            bins[round((d % FRAME_US) / GRID_US) % len(bins)] += 1
-        if abs(r1000) <= TOL_US:
-            on1000 += 1
-
-    n = len(usable)
-    out["on_125us_grid"] = on125 / n
-    out["on_1000us_grid"] = on1000 / n
+        bins[round((d % FRAME_US) / GRID_US) % len(bins)] += 1
     out["bins_125us"] = bins
-    out["residue_rms_us"] = round(
-        statistics.pstdev([fold(d, GRID_US) for d in usable]), 1
+
+    # Rayleigh test per candidate grid; the significance floor guards against
+    # both random flukes (3.72/sqrt(n) ~ p=1e-6) and weak residual structure.
+    crit = max(0.15, 3.72 / math.sqrt(n))
+    out["R"] = {g: round(circ_R(usable, g), 3) for g in CANDIDATES_US}
+    out["R_crit"] = round(crit, 3)
+    grid = next((g for g in CANDIDATES_US if out["R"][g] >= crit), None)
+
+    if grid is None:
+        out["verdict"] = "no polling grid visible"
+        return out
+    out["grid_us"] = grid
+
+    # Jitter estimate from the concentration at the detected grid: for
+    # Gaussian stamping noise, R = exp(-2 pi^2 (sigma_delta/g)^2). sigma_delta
+    # combines two timestamps, so per-stamp jitter is sigma_delta/sqrt(2).
+    # A finer grid g' is detectable only while R(g') clears crit -- report
+    # that floor so "no finer grid seen" isn't mistaken for "none exists".
+    R = out["R"][grid]
+    sigma_d = (grid / math.pi) * math.sqrt(max(math.log(1 / R), 0) / 2)
+    out["stamp_jitter_us"] = round(sigma_d / math.sqrt(2), 1)
+    out["finest_detectable_us"] = round(
+        math.pi * sigma_d * math.sqrt(2 / math.log(1 / crit)), 1
     )
 
-    if on125 / n < 0.9:
-        out["verdict"] = "no polling grid visible (jitter > tolerance?)"
-        return out
-
-    # The mod test alone can't tell a coarse grid that divides evenly into
-    # 1 ms (a 15 ms BLE conn interval "passes" as 1 kHz). The actual grid is
-    # the GCD of the deltas snapped to the 125 us hypothesis.
-    from math import gcd
-    from functools import reduce
-    snapped = [round(d / GRID_US) * GRID_US for d in usable
-               if abs(fold(d, GRID_US)) <= TOL_US]
-    base = reduce(gcd, snapped)
-    out["grid_us"] = base
-    if base in (125, 250, 500, 1000):
-        khz = 1000 // base
-        tag = " CONFIRMED" if base == GRID_US else ""
-        out["verdict"] = f"{khz} kHz polling ({base} us grid){tag}"
+    if grid in (125, 250, 500, 1000):
+        khz = 1000 // grid
+        tag = " CONFIRMED" if grid == GRID_US else ""
+        out["verdict"] = f"{khz} kHz polling ({grid} us grid){tag}"
     else:
-        out["verdict"] = (f"arrival grid is {base} us -- not a USB polling "
+        out["verdict"] = (f"arrival grid is {grid} us -- not a USB polling "
                           "grid (BLE conn interval?)")
     return out
 
@@ -222,22 +234,33 @@ def print_report(res, latencies_ms=None):
               "(how close two reports actually arrived)")
     if "bins_125us" in res:
         total = sum(res["bins_125us"]) or 1
-        chance = 2 * TOL_US / GRID_US  # ungridded data lands "on grid" this often
-        print(f"on 125 us grid: {res['on_125us_grid']:.1%} "
-              f"(chance baseline {chance:.0%}, real grid ~100%)   "
-              f"on 1 ms grid: {res['on_1000us_grid']:.1%}   "
-              f"residue RMS: {res['residue_rms_us']} us "
-              f"(uniform/no grid = {GRID_US / 12**0.5:.0f} us)")
-        print("delta mod 1 ms histogram (8 x 125 us bins; 1 kHz = bin 0 only):")
+        print("delta mod 1 ms histogram (8 x 125 us bins; 1 kHz = peak at "
+              "bin 0, 8 kHz = flat-ish, no grid = flat):")
         for i, b in enumerate(res["bins_125us"]):
             bar = "#" * round(40 * b / total)
             print(f"  {i * GRID_US:4d} us |{bar:<40}| {b}")
+    if "R" in res:
+        row = "   ".join(f"{g}:{r:.2f}" for g, r in res["R"].items())
+        print(f"grid concentration R (significant >= {res['R_crit']}): {row}")
+    if "stamp_jitter_us" in res:
+        print(f"timestamp jitter: ~{res['stamp_jitter_us']} us per stamp; "
+              f"grids finer than ~{res['finest_detectable_us']} us are "
+              "invisible at this jitter")
+        if res["finest_detectable_us"] > GRID_US:
+            print("  ^ too high to have seen a 125 us grid -- rerun as root "
+                  "(holds /dev/cpu_dma_latency at 0 to disable deep C-states)")
+    if "press_release_ms" in res:
+        s = res["press_release_ms"]
+        print(f"press->release arrival delta (ms, firmware-timed 20 ms pair, "
+              f"n={s['n']}): min {s['min']:.3f}  p50 {s['p50']:.3f}  "
+              f"mean {s['mean']:.3f}  max {s['max']:.3f}   "
+              "(cleanest firmware-A/B latency metric)")
     if latencies_ms:
         ls = sorted(latencies_ms)
         print(f"cmd->press latency (ms): "
               f"min {ls[0]:.2f}  p50 {ls[len(ls) // 2]:.2f}  "
               f"mean {statistics.fmean(ls):.2f}  max {ls[-1]:.2f}   "
-              f"(A/B this between firmwares)")
+              "(includes ~70 ms aster/subprocess overhead)")
     print(f"\nVERDICT: {res['verdict']}")
 
 
@@ -336,6 +359,20 @@ def main():
                      "plugged in? (--list shows all keyboards, --device picks one)")
     print(f"capturing {node} ({desc})")
 
+    # Deep C-state exit latency (~100+ us) dominates evdev timestamp jitter
+    # and can blur the 125 us grid into invisibility. Holding
+    # /dev/cpu_dma_latency at 0 pins the CPUs to shallow idle states for the
+    # lifetime of this fd (the cyclictest trick). Root only; warn otherwise.
+    dma_latency = None
+    try:
+        dma_latency = open("/dev/cpu_dma_latency", "wb", buffering=0)
+        dma_latency.write(struct.pack("<I", 0))
+        print("C-states pinned shallow via /dev/cpu_dma_latency "
+              "(low-jitter timestamps)")
+    except (PermissionError, OSError):
+        print("WARNING: no /dev/cpu_dma_latency access -- timestamp jitter "
+              "may hide fine grids; rerun as root for a conclusive result")
+
     cap = Capture(node)
     time.sleep(0.3)
     try:
@@ -348,9 +385,27 @@ def main():
         time.sleep(0.3)
     finally:
         cap.stop()
+        if dma_latency:
+            dma_latency.close()
 
     code = None if args.manual else KEY_F24
     res = analyze(arrivals(cap.events, code), args.max_delta_ms * 1000)
+
+    # Inject mode: the press->release pair is submitted 20 ms apart by the
+    # firmware (k_msleep in handle_key_inject) and both ends are kernel-
+    # stamped, so its arrival delta is the cleanest firmware-A/B latency
+    # metric -- zero aster/subprocess noise; only the USB pickup shifts.
+    if not args.manual:
+        f24 = sorted((t, v) for t, c, v in cap.events if c == KEY_F24)
+        pr = [(b - a) / 1000 for (a, av), (b, bv) in zip(f24, f24[1:])
+              if av == 1 and bv == 0]
+        if pr:
+            ls = sorted(pr)
+            res["press_release_ms"] = {
+                "min": ls[0], "p50": ls[len(ls) // 2],
+                "mean": statistics.fmean(ls), "max": ls[-1], "n": len(ls),
+            }
+
     print_report(res, latencies)
 
     if args.json:
