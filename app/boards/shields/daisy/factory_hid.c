@@ -40,6 +40,7 @@
 #include <dt-bindings/zmk/hid_usage_pages.h>
 
 #include "factory_state.h"
+#include "factory_mode_changed.h"
 #include "crash_info.h"
 
 #if IS_ENABLED(CONFIG_ZMK_BLE)
@@ -252,6 +253,8 @@ bool zmk_sleep_inhibited(void) { return factory_mode; }
 /* Shared with the board LED modules so they stop driving the LEDs while a
  * factory test run has (exclusive) control of them. See factory_state.h. */
 bool daisy_factory_mode_active(void) { return factory_mode; }
+
+ZMK_EVENT_IMPL(daisy_factory_mode_changed);
 
 /*
  * QMK-compatible raw HID report descriptor: a single vendor application
@@ -832,6 +835,9 @@ static uint8_t handle_factory_mode_set(const uint8_t *req, uint8_t req_len) {
     }
     factory_mode = req[0] != 0;
     LOG_INF("factory mode %s", factory_mode ? "entered" : "exited");
+    /* Let the modules that stood down for the factory tool (touchpad power
+     * follow, ...) re-converge on exit. */
+    raise_daisy_factory_mode_changed((struct daisy_factory_mode_changed){.active = factory_mode});
     return DAISY_FACTORY_OK;
 }
 

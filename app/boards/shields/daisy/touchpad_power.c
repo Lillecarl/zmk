@@ -30,6 +30,7 @@
  */
 
 #include <zephyr/device.h>
+#include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/pm/device.h>
 
@@ -50,6 +51,7 @@
 
 #if IS_ENABLED(CONFIG_DAISY_FACTORY)
 #include "factory_state.h"
+#include "factory_mode_changed.h"
 #else
 /* No factory interface built -> factory mode can never be active. */
 static inline bool daisy_factory_mode_active(void) { return false; }
@@ -180,5 +182,27 @@ ZMK_SUBSCRIPTION(daisy_tp_power, zmk_endpoint_changed);
 #if IS_ENABLED(CONFIG_ZMK_BLE)
 ZMK_SUBSCRIPTION(daisy_tp_power, zmk_ble_active_profile_changed);
 #endif
+#if IS_ENABLED(CONFIG_DAISY_FACTORY)
+/* tp_follow_host_work stands down while factory mode is active; nothing else
+ * re-runs it on exit, so the pad could stay stale until the next endpoint
+ * event. */
+ZMK_SUBSCRIPTION(daisy_tp_power, daisy_factory_mode_changed);
+#endif
+
+/* pad_on's baseline is "on" and only events correct it, so on a hostless
+ * boot (battery, no bond connected) the pad stayed in Run/Idle until the
+ * first endpoint/BLE event. Run one follow pass after boot. Delayed past USB
+ * enumeration so a USB-powered boot doesn't bounce the pad off then on. */
+#define TP_BOOT_FOLLOW_DELAY_MS 2000
+
+static void tp_boot_follow(struct k_work *work) { k_work_submit(&tp_follow_work); }
+static K_WORK_DELAYABLE_DEFINE(tp_boot_follow_work, tp_boot_follow);
+
+static int tp_power_init(void) {
+    k_work_schedule(&tp_boot_follow_work, K_MSEC(TP_BOOT_FOLLOW_DELAY_MS));
+    return 0;
+}
+
+SYS_INIT(tp_power_init, APPLICATION, 99);
 
 #endif /* touchpad okay && CONFIG_PM_DEVICE */
