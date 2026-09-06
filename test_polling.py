@@ -161,14 +161,16 @@ def arrivals(events, code=None):
 CANDIDATES_US = [30_000, 15_000, 11_250, 7_500, 1000, 500, 250, 125]
 
 
-def circ_R(deltas, g):
-    """Circular concentration of deltas modulo grid g: 1.0 = perfectly on
-    grid, ~1/sqrt(n) = no relation to g (Rayleigh). Tolerance-free -- a grid
-    smeared by timestamp jitter shows a reduced but still significant R
-    instead of falling off a hard threshold cliff."""
-    re = sum(math.cos(2 * math.pi * (d % g) / g) for d in deltas)
-    im = sum(math.sin(2 * math.pi * (d % g) / g) for d in deltas)
-    return math.hypot(re, im) / len(deltas)
+def grid_C(deltas, g):
+    """Concentration of deltas at ZERO phase modulo grid g: 1.0 = all deltas
+    are exact multiples of g, ~0 = no relation. The signed cosine (not the
+    Rayleigh magnitude |R|) is essential: deltas that merely cluster in VALUE
+    (250 identical 21 ms press->release pairs, human typing cadence) are
+    'concentrated' modulo any grid coarser than their spread, but at an
+    arbitrary phase -- the cosine cancels those, while true grid multiples
+    (residues near 0) score ~1. Jitter reduces C gracefully instead of
+    falling off a tolerance cliff."""
+    return sum(math.cos(2 * math.pi * (d % g) / g) for d in deltas) / len(deltas)
 
 
 def analyze(ts, max_delta_us):
@@ -191,25 +193,31 @@ def analyze(ts, max_delta_us):
         bins[round((d % FRAME_US) / GRID_US) % len(bins)] += 1
     out["bins_125us"] = bins
 
-    # Rayleigh test per candidate grid; the significance floor guards against
-    # both random flukes (3.72/sqrt(n) ~ p=1e-6) and weak residual structure.
+    # Zero-phase concentration per candidate grid; the significance floor
+    # guards against random flukes (3.72/sqrt(n) ~ Rayleigh p=1e-6). The
+    # winner is the coarsest grid scoring within 90% of the best: a 1 kHz
+    # stream scores ~equally at 125/250/500/1000 us (multiples of 1000 are
+    # multiples of all of them), so the coarsest of the near-ties is the true
+    # quantum -- but a coarse grid with only residual cadence structure never
+    # comes close to a fine grid's near-1.0 score.
     crit = max(0.15, 3.72 / math.sqrt(n))
-    out["R"] = {g: round(circ_R(usable, g), 3) for g in CANDIDATES_US}
-    out["R_crit"] = round(crit, 3)
-    grid = next((g for g in CANDIDATES_US if out["R"][g] >= crit), None)
-
-    if grid is None:
+    out["C"] = {g: round(grid_C(usable, g), 3) for g in CANDIDATES_US}
+    out["C_crit"] = round(crit, 3)
+    best = max(out["C"].values())
+    if best < crit:
         out["verdict"] = "no polling grid visible"
         return out
+    grid = next(g for g in CANDIDATES_US
+                if out["C"][g] >= max(crit, 0.9 * best))
     out["grid_us"] = grid
 
     # Jitter estimate from the concentration at the detected grid: for
-    # Gaussian stamping noise, R = exp(-2 pi^2 (sigma_delta/g)^2). sigma_delta
+    # Gaussian stamping noise, C = exp(-2 pi^2 (sigma_delta/g)^2). sigma_delta
     # combines two timestamps, so per-stamp jitter is sigma_delta/sqrt(2).
-    # A finer grid g' is detectable only while R(g') clears crit -- report
+    # A finer grid g' is detectable only while C(g') clears crit -- report
     # that floor so "no finer grid seen" isn't mistaken for "none exists".
-    R = out["R"][grid]
-    sigma_d = (grid / math.pi) * math.sqrt(max(math.log(1 / R), 0) / 2)
+    C = out["C"][grid]
+    sigma_d = (grid / math.pi) * math.sqrt(max(math.log(1 / C), 0) / 2)
     out["stamp_jitter_us"] = round(sigma_d / math.sqrt(2), 1)
     out["finest_detectable_us"] = round(
         math.pi * sigma_d * math.sqrt(2 / math.log(1 / crit)), 1
@@ -239,16 +247,21 @@ def print_report(res, latencies_ms=None):
         for i, b in enumerate(res["bins_125us"]):
             bar = "#" * round(40 * b / total)
             print(f"  {i * GRID_US:4d} us |{bar:<40}| {b}")
-    if "R" in res:
-        row = "   ".join(f"{g}:{r:.2f}" for g, r in res["R"].items())
-        print(f"grid concentration R (significant >= {res['R_crit']}): {row}")
+    if "C" in res:
+        row = "   ".join(f"{g}:{c:.2f}" for g, c in res["C"].items())
+        print(f"zero-phase grid concentration C (significant >= "
+              f"{res['C_crit']}): {row}")
     if "stamp_jitter_us" in res:
         print(f"timestamp jitter: ~{res['stamp_jitter_us']} us per stamp; "
               f"grids finer than ~{res['finest_detectable_us']} us are "
               "invisible at this jitter")
         if res["finest_detectable_us"] > GRID_US:
-            print("  ^ too high to have seen a 125 us grid -- rerun as root "
-                  "(holds /dev/cpu_dma_latency at 0 to disable deep C-states)")
+            hint = ("this run had C-states pinned; the residual jitter is "
+                    "elsewhere (xhci interrupt moderation?)"
+                    if res.get("cstates_pinned") else
+                    "rerun as root (holds /dev/cpu_dma_latency at 0 to "
+                    "disable deep C-states)")
+            print(f"  ^ too high to have seen a 125 us grid -- {hint}")
     if "press_release_ms" in res:
         s = res["press_release_ms"]
         print(f"press->release arrival delta (ms, firmware-timed 20 ms pair, "
@@ -390,6 +403,7 @@ def main():
 
     code = None if args.manual else KEY_F24
     res = analyze(arrivals(cap.events, code), args.max_delta_ms * 1000)
+    res["cstates_pinned"] = dma_latency is not None
 
     # Inject mode: the press->release pair is submitted 20 ms apart by the
     # firmware (k_msleep in handle_key_inject) and both ends are kernel-
