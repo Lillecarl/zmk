@@ -13,6 +13,10 @@ ptp-input-report-id = <4>;
 mouse-input-report-size = <8>;
 ptp-input-report-size = <29>;
 feature-report-ids = <2 3 5 6 7 10 11 65 66 67>;
+/* Data bytes per feature report (excl. ID), read off the descriptor: 7 is
+ * 1 bit + 7 padding, 66/67 are 3-byte register accessors, 10/65 the 256-byte
+ * vendor blobs. Bounds the I2C read a GET clocks. */
+feature-report-sizes = <1 1 1 1 1 256 1 256 3 3>;
 report-descriptor = [
   05 01          //   Usage Page (Generic Desktop Controls)
   09 02          //   Usage (Mouse)
