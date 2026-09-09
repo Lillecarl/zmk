@@ -692,33 +692,74 @@ static const struct bt_le_conn_param conn_param_active = BT_LE_CONN_PARAM_INIT(
 static const struct bt_le_conn_param conn_param_inactive =
     BT_LE_CONN_PARAM_INIT(80, 80, 19, 600); /* 100 ms, latency 19, 6 s */
 
-static void apply_link_params_cb(struct bt_conn *conn, void *data) {
-    struct bt_conn_info info;
-    char addr[BT_ADDR_LE_STR_LEN];
-
-    if (bt_conn_get_info(conn, &info) != 0 || info.type != BT_CONN_TYPE_LE ||
-        info.role != BT_CONN_ROLE_PERIPHERAL || info.state != BT_CONN_STATE_CONNECTED) {
-        return;
+/* Which parameter set this link should be running, or NULL if we should keep
+ * out of it. Fills *info, which the caller needs anyway.
+ *
+ * A peer that matches no profile is a pairing in progress: the open profile's
+ * address is only recorded once bonding completes (set_profile_address ->
+ * profile-changed event -> back here). Leave the host's default preferences in
+ * charge until then, or a passkey-entry pairing that outlasts the 5 s timer
+ * would idle its own link. */
+static const struct bt_le_conn_param *link_params_for(struct bt_conn *conn,
+                                                      struct bt_conn_info *info) {
+    if (bt_conn_get_info(conn, info) != 0 || info->type != BT_CONN_TYPE_LE ||
+        info->role != BT_CONN_ROLE_PERIPHERAL || info->state != BT_CONN_STATE_CONNECTED) {
+        return NULL;
     }
 
-    /* A peer that matches no profile is a pairing in progress: the open
-     * profile's address is only recorded once bonding completes
-     * (set_profile_address -> profile-changed event -> back here). Leave the
-     * host's default preferences in charge until then, or a passkey-entry
-     * pairing that outlasts the 5 s timer would idle its own link. */
     if (zmk_ble_profile_index(bt_conn_get_dst(conn)) < 0) {
-        return;
+        return NULL;
     }
 
-    bool active = is_conn_active_profile(conn);
-    const struct bt_le_conn_param *param = active ? &conn_param_active : &conn_param_inactive;
+    return is_conn_active_profile(conn) ? &conn_param_active : &conn_param_inactive;
+}
 
-    /* Already there (e.g. re-applied on another profile's connect): don't
-     * start a procedure for nothing. */
-    if (info.le.interval >= param->interval_min && info.le.interval <= param->interval_max &&
-        info.le.latency == param->latency && info.le.timeout == param->timeout) {
-        return;
+/* Microseconds is the canonical unit here: bt_conn_info carries the interval
+ * that way (bt_conn_le_info.interval is deprecated, and compiled out entirely
+ * under CONFIG_BT_SHORTER_CONNECTION_INTERVALS), while bt_le_conn_param and the
+ * le_param_updated() callback both use 1.25 ms units. */
+#define LINK_PARAM_INTERVAL_US(units) ((uint32_t)(units) * 1250U)
+
+static bool link_params_match(const struct bt_le_conn_param *param, uint32_t interval_us,
+                              uint16_t latency, uint16_t timeout) {
+    return interval_us >= LINK_PARAM_INTERVAL_US(param->interval_min) &&
+           interval_us <= LINK_PARAM_INTERVAL_US(param->interval_max) &&
+           latency == param->latency && timeout == param->timeout;
+}
+
+/* Whether a granted parameter set is good enough for this link's role, as
+ * opposed to being exactly what we asked for.
+ *
+ * Deliberately weaker than link_params_match(): a central that grants the
+ * request in spirit -- a longer interval on an idle link, more latency, a
+ * shorter supervision timeout -- is not worth fighting. Our own dongle does
+ * exactly that (le_param_req() in hid-remapper-private pins interval_max to
+ * interval_min and clamps the timeout to CONN_TIMEOUT_AWAKE while its host is
+ * awake), so an exact test here would read every clamped grant as a refusal
+ * and disarm the re-assert below for the rest of the connection.
+ *
+ * Two things have to hold. The wake period, interval x (1 + latency), must be
+ * no shorter than the role asks for -- that is the only property of a granted
+ * set that can pre-empt another link's connection events, and the whole point
+ * of the inactive set. And on the active link the interval is also the report
+ * cadence, so a longer one is a real loss there even when latency makes the
+ * wake period look fine; an inactive link is idle and may have any interval. */
+static bool link_params_ok(const struct bt_le_conn_param *param, uint32_t interval_us,
+                           uint16_t latency) {
+    if (param == &conn_param_active &&
+        interval_us > LINK_PARAM_INTERVAL_US(param->interval_max)) {
+        return false;
     }
+
+    uint64_t granted = (uint64_t)interval_us * (1U + latency);
+    uint64_t wanted = (uint64_t)LINK_PARAM_INTERVAL_US(param->interval_min) * (1U + param->latency);
+
+    return granted >= wanted;
+}
+
+static void request_link_params(struct bt_conn *conn, const struct bt_le_conn_param *param) {
+    char addr[BT_ADDR_LE_STR_LEN];
+    const char *role = (param == &conn_param_active) ? "active" : "inactive";
 
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
     /* Before the host's 5 s post-connect update timer has fired this only
@@ -726,14 +767,29 @@ static void apply_link_params_cb(struct bt_conn *conn, void *data) {
      * preferences; afterwards it goes out right away. */
     int err = bt_conn_le_param_update(conn, param);
     if (err) {
-        LOG_WRN("%s: %s-profile param update (%u-%u/%u/%u) failed: %d", addr,
-                active ? "active" : "inactive", param->interval_min, param->interval_max,
-                param->latency, param->timeout, err);
+        LOG_WRN("%s: %s-profile param update (%u-%u/%u/%u) failed: %d", addr, role,
+                param->interval_min, param->interval_max, param->latency, param->timeout, err);
     } else {
-        LOG_DBG("%s: requesting %s-profile params %u-%u/%u/%u", addr,
-                active ? "active" : "inactive", param->interval_min, param->interval_max,
-                param->latency, param->timeout);
+        LOG_DBG("%s: requesting %s-profile params %u-%u/%u/%u", addr, role, param->interval_min,
+                param->interval_max, param->latency, param->timeout);
     }
+}
+
+static void apply_link_params_cb(struct bt_conn *conn, void *data) {
+    struct bt_conn_info info;
+    const struct bt_le_conn_param *param = link_params_for(conn, &info);
+
+    if (param == NULL) {
+        return;
+    }
+
+    /* Already there (e.g. re-applied on another profile's connect): don't
+     * start a procedure for nothing. */
+    if (link_params_match(param, info.le.interval_us, info.le.latency, info.le.timeout)) {
+        return;
+    }
+
+    request_link_params(conn, param);
 }
 
 /* Re-evaluate every peripheral link's parameters against the active profile.
@@ -741,6 +797,56 @@ static void apply_link_params_cb(struct bt_conn *conn, void *data) {
 static void apply_link_params(void) {
     bt_conn_foreach(BT_CONN_TYPE_LE, apply_link_params_cb, NULL);
 }
+
+/* Connection parameters are not ours to keep: the central may start an update
+ * at any time, and both of ours do -- BlueZ over the life of a HID link, and
+ * our own host CONFIG_BT_CONN_PARAM_UPDATE_TIMEOUT ms after connect. Whatever
+ * it picks replaces what apply_link_params() asked for, and since that only
+ * runs on connect and on a profile switch, an idle link could sit at the
+ * active profile's 7.5 ms / latency 30 for the rest of its life -- waking every
+ * 31 intervals and stealing one connection event from the active link every
+ * 232.5 ms, which is a burst pair on the host and a discarded frame in
+ * libinput. Measured that way: aster issues/inactive-link-params-not-reasserted.md.
+ *
+ * So an update that leaves a link off its role's parameters is answered by
+ * asking again, with one credit per link: spent on the re-assert, refilled
+ * whenever the link is *seen* at the parameters its role wants. A central that
+ * simply refuses gets asked once and then left alone (we never see the match
+ * that would refill the credit), while a central that keeps overriding a link
+ * it had granted gets answered every time -- no unbounded ping-pong either
+ * way.
+ *
+ * The work item is not optional: le_param_updated() runs on the host RX thread
+ * (hci_core.c, LE Connection Update Complete) and bt_conn_le_param_update()
+ * blocks on an HCI command once the peripheral param-update timer has expired
+ * (send_conn_le_param_update -> bt_conn_le_conn_update ->
+ * bt_hci_cmd_send_sync), which is exactly the case on a link that has been up
+ * a while. Re-asserting inline would block HCI RX on a command completion that
+ * HCI RX is itself responsible for delivering. The system workqueue is where
+ * the connect and profile-switch paths already call apply_link_params() from. */
+BUILD_ASSERT(CONFIG_BT_MAX_CONN <= 32, "link_reassert_pending is a 32-bit conn-index mask");
+static atomic_t link_reassert_pending;
+static bool link_reassert_spent[CONFIG_BT_MAX_CONN];
+
+static void link_reassert_cb(struct bt_conn *conn, void *data) {
+    uint8_t index = bt_conn_index(conn);
+
+    /* Claim the request, so a link whose bit was set exactly once is
+     * re-asserted exactly once even if the work runs late and coalesced. */
+    if ((atomic_and(&link_reassert_pending, ~BIT(index)) & BIT(index)) == 0) {
+        return;
+    }
+
+    /* Re-reads the link's current parameters, so an update that arrived in the
+     * meantime (ours included) simply makes this a no-op. */
+    apply_link_params_cb(conn, NULL);
+}
+
+static void link_reassert_work_cb(struct k_work *work) {
+    bt_conn_foreach(BT_CONN_TYPE_LE, link_reassert_cb, NULL);
+}
+
+K_WORK_DEFINE(link_reassert_work, link_reassert_work_cb);
 
 static void connected(struct bt_conn *conn, uint8_t err) {
     char addr[BT_ADDR_LE_STR_LEN];
@@ -764,6 +870,11 @@ static void connected(struct bt_conn *conn, uint8_t err) {
     }
 
     LOG_DBG("Connected %s", addr);
+
+    /* A new link (or a reused conn slot) starts with its re-assert credit
+     * intact and nothing pending from whoever held the slot before. */
+    atomic_and(&link_reassert_pending, ~BIT(bt_conn_index(conn)));
+    link_reassert_spent[bt_conn_index(conn)] = false;
 
     update_advertising();
     apply_link_params();
@@ -843,10 +954,45 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
 static void le_param_updated(struct bt_conn *conn, uint16_t interval, uint16_t latency,
                              uint16_t timeout) {
     char addr[BT_ADDR_LE_STR_LEN];
+    struct bt_conn_info info;
 
     bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
 
     LOG_DBG("%s: interval %d latency %d timeout %d", addr, interval, latency, timeout);
+
+    const struct bt_le_conn_param *param = link_params_for(conn, &info);
+    if (param == NULL) {
+        return;
+    }
+
+    uint8_t index = bt_conn_index(conn);
+    const char *role = (param == &conn_param_active) ? "active" : "inactive";
+
+    if (link_params_ok(param, LINK_PARAM_INTERVAL_US(interval), latency)) {
+        /* Good enough: nothing here can pre-empt the active link, so take it
+         * and hand the link a fresh credit for the next override. */
+        link_reassert_spent[index] = false;
+        return;
+    }
+
+    if (link_reassert_spent[index]) {
+        /* Asked once already and the central still wants a shorter wake than
+         * this link's role does; leaving it alone rather than ping-ponging. On
+         * an inactive link this is the 232.5 ms pre-emption above, so it is
+         * worth seeing in a log rather than only in an arrival histogram. */
+        LOG_WRN("%s: %s-profile link left waking every %u us (%u/%u/%u), wanted %u-%u/%u/%u", addr,
+                role, (unsigned int)(LINK_PARAM_INTERVAL_US(interval) * (1U + latency)), interval,
+                latency, timeout, param->interval_min, param->interval_max, param->latency,
+                param->timeout);
+        return;
+    }
+
+    LOG_INF("%s: %s-profile link updated to %u/%u/%u by the peer; re-asserting %u-%u/%u/%u", addr,
+            role, interval, latency, timeout, param->interval_min, param->interval_max,
+            param->latency, param->timeout);
+    link_reassert_spent[index] = true;
+    atomic_or(&link_reassert_pending, BIT(index));
+    k_work_submit(&link_reassert_work);
 }
 
 static struct bt_conn_cb conn_callbacks = {
