@@ -21,8 +21,12 @@ Phases:
               and regularity (flags a periodic beat such as 15/7.5/7.5 ms =
               firmware pacing vs BLE connection interval), PTP scan-time vs
               host clock drift, dropped-vs-coalesced-frame estimate, X/Y
-              coverage, contact count, and whether hid-multitouch turned it
-              into evdev events.
+              coverage, contact count, whether hid-multitouch turned it
+              into evdev events, and -- replaying libinput's own
+              tp_detect_jumps() over the frames -- exactly which motion
+              libinput will DISCARD as a cursor jump (libinput's own
+              warning is rate-limited to 5 per 24 h, so it can't be
+              counted from the log).
   4 ble       (--ble) repeat 2+3 against the Bluetooth HOGP hid device,
               so USB and BLE timings can be compared.
 
@@ -612,6 +616,161 @@ def unwrap_scan_times(raws):
     return out
 
 
+# ------------------------------------------------- libinput jump predictor
+
+# libinput's touchpad jump detection, frame for frame (libinput
+# src/evdev-mt-touchpad.c, tp_detect_jumps). The finger travel of each frame
+# is NORMALIZED to a 12 ms reference interval:
+#
+#     abs_distance = hypot(dx_mm, dy_mm) * 12ms / tdelta
+#
+# so a burst-mate -- the second of two frames the controller put in one
+# connection event, landing ~50 us after its partner -- has its travel
+# scaled by 12/0.05 = 240x, sails past the 20 mm threshold, and libinput
+# DISCARDS its motion (tp_motion_history_reset). That is the cursor jump.
+# A frame that merely arrives one connection event late (15 ms, double
+# travel) normalizes back to the same distance and is harmless, and
+# anything beyond 2.5x the reference (30 ms) is exempt outright. So the
+# thing to count is not late frames, it's frames that arrive too EARLY.
+#
+# Reimplemented here rather than scraped out of libinput's own log, because
+# that warning is rate-limited to 5 per 24 HOURS per device
+# (ratelimit_init(&tp->jump.warning, usec_from_hours(24), 5) in
+# tp_init_jumps): its absence proves nothing and its occurrences cannot be
+# counted. Needs the real device resolution, so it reads units/mm off the
+# evdev node instead of assuming.
+JUMP_REF_S = 0.012
+JUMP_ABS_MM = 20.0
+JUMP_REL_MM = 7.0
+JUMP_EXEMPT_FACTOR = 2.5
+JUMP_BURST_MS = 2.0  # "arrived too early to be its own connection event"
+DEFAULT_RES = 12.0
+
+_ABSINFO_LEN = 24  # struct input_absinfo: 6 x int32
+
+
+def _eviocgabs(code):
+    return (2 << 30) | (_ABSINFO_LEN << 16) | (ord("E") << 8) | (0x40 + code)
+
+
+def evdev_touch_res(paths):
+    """(res_x, res_y, node) in units/mm from the first node that reports them."""
+    for path in paths:
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        except OSError:
+            continue
+        try:
+            res = []
+            for code in (ABS_MT_POSITION_X, ABS_MT_POSITION_Y):
+                buf = bytearray(_ABSINFO_LEN)
+                fcntl.ioctl(fd, _eviocgabs(code), buf, True)
+                res.append(struct.unpack("6i", bytes(buf))[5])
+            if all(r > 0 for r in res):
+                return float(res[0]), float(res[1]), path
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
+    return DEFAULT_RES, DEFAULT_RES, None
+
+
+def frame_state(f):
+    """The state the FIRMWARE calls urgent (hid_passthrough_ble.c,
+    tp_frame_state): per-finger status + contact count + buttons. A change
+    here makes the keyboard bypass its coalescing gate, which is the one
+    place the fixed firmware still emits a burst-mate on purpose -- so a
+    jump that lands on such a frame accuses the bypass, not the radio."""
+    return (tuple((fg["confidence"], fg["tip"], fg["cid"]) for fg in f["fingers"]),
+            f["contact_count"], f["buttons"])
+
+
+class JumpDetector:
+    def __init__(self, res_x=DEFAULT_RES, res_y=DEFAULT_RES):
+        self.res_x, self.res_y = res_x, res_y
+        self.touches = {}     # contact id -> libinput's per-touch history
+        self.prev_state = None
+        self.frames = 0
+        self.jumps = []
+
+    def feed(self, t, f):
+        """Feed one PTP frame; returns this frame's jumps (usually none)."""
+        self.frames += 1
+        state = frame_state(f)
+        urgent = self.prev_state is not None and state != self.prev_state
+        self.prev_state = state
+
+        hits, live = [], set()
+        for fg in f["fingers"]:
+            if not fg["tip"]:
+                continue
+            cid = fg["cid"]
+            live.add(cid)
+            st = self.touches.get(cid)
+            if st is None:
+                # history.count == 0: libinput zeroes last_delta_mm and bails
+                self.touches[cid] = {"x": fg["x"], "y": fg["y"], "t": t,
+                                     "last_mm": 0.0, "n": 0}
+                continue
+            st["n"] += 1
+            tdelta = t - st["t"]
+            dx = abs(fg["x"] - st["x"]) / self.res_x
+            dy = abs(fg["y"] - st["y"]) / self.res_y
+            st["x"], st["y"], st["t"] = fg["x"], fg["y"], t
+            if tdelta <= 0 or tdelta > JUMP_REF_S * JUMP_EXEMPT_FACTOR:
+                continue  # exempt, and last_delta_mm keeps its old value
+            abs_mm = math.hypot(dx, dy) * JUMP_REF_S / tdelta
+            rel_mm = abs_mm - st["last_mm"]
+            st["last_mm"] = abs_mm
+            if abs_mm > JUMP_ABS_MM or rel_mm > JUMP_REL_MM:
+                # last_delta_mm starts at 0 for a new touch, so the SECOND
+                # frame of a brisk swipe can trip the 7 mm relative threshold
+                # all by itself. That is libinput's own baseline artifact, not
+                # a delivery defect -- counted apart so it can't hide one.
+                hit = {"t": t, "cid": cid, "dt_ms": tdelta * 1e3, "abs_mm": abs_mm,
+                       "rel_mm": rel_mm, "urgent": urgent, "start": st["n"] == 1}
+                hits.append(hit)
+                self.jumps.append(hit)
+        for cid in [c for c in self.touches if c not in live]:
+            del self.touches[cid]
+        return hits
+
+    def describe(self, j):
+        return (f"dt {j['dt_ms']:.2f}ms -> normalized {j['abs_mm']:.1f}mm "
+                f"(limit {JUMP_ABS_MM:g}), rel {j['rel_mm']:+.1f}mm "
+                f"(limit {JUMP_REL_MM:g})"
+                + ("  [2nd frame of the touch: libinput baseline artifact]"
+                   if j["start"] else "")
+                + ("  [tip/button/contact change: firmware urgent bypass]"
+                   if j["urgent"] else ""))
+
+    def real(self):
+        """Jumps that a delivery defect could be responsible for."""
+        return [j for j in self.jumps if not j["start"]]
+
+    def summary(self):
+        real = self.real()
+        bursts = [j for j in real if j["dt_ms"] < JUMP_BURST_MS]
+        return {"frames": self.frames, "jumps": len(real),
+                "burst_mates": len(bursts), "large_deltas": len(real) - len(bursts),
+                "on_urgent_frame": len([j for j in real if j["urgent"]]),
+                "touch_start_artifacts": len(self.jumps) - len(real),
+                "res": [self.res_x, self.res_y]}
+
+
+def jump_detail(det):
+    s = det.summary()
+    tail = (f" (+{s['touch_start_artifacts']} touch-start artifacts, harmless)"
+            if s["touch_start_artifacts"] else "")
+    if not s["jumps"]:
+        return f"0 of {s['frames']} frames{tail}"
+    return (f"{s['jumps']}/{s['frames']} frames "
+            f"({100.0 * s['jumps'] / max(1, s['frames']):.1f}%): "
+            f"{s['burst_mates']} burst-mates (<{JUMP_BURST_MS:g}ms after the "
+            f"previous frame), {s['large_deltas']} large single-frame deltas; "
+            f"{s['on_urgent_frame']} on a tip/button/contact change{tail}")
+
+
 def analyze_motion(cap, rep, res_prefix):
     """Stats + checks for a continuous one-finger motion capture."""
     by_id = {}
@@ -734,6 +893,21 @@ def analyze_motion(cap, rep, res_prefix):
                       f"X<= {max(xs)}, Y<= {max(ys)}")
         maxcc = max(f["contact_count"] for _, f in ptp)
         out["max_contact_count"] = maxcc
+
+        # The motion libinput will actually throw away (see JumpDetector).
+        # This is the number the user feels; arrival histograms only imply it.
+        res_x, res_y, res_node = evdev_touch_res([n for n, _ in cap.tp.event_nodes])
+        det = JumpDetector(res_x, res_y)
+        for t, f in ptp:
+            det.feed(t, f)
+        rep.info(f"jump predictor: {res_x:g}/{res_y:g} units/mm"
+                 + (f" from {res_node}" if res_node
+                    else " (no evdev resolution, assumed)"))
+        rep.check("no motion libinput would discard as a cursor jump",
+                  not det.real(), jump_detail(det), warn_only=True)
+        for j in det.jumps[:6]:
+            rep.info("  " + det.describe(j))
+        out["libinput_jumps"] = det.summary()
 
     # evdev side
     total_ev = {n: len(v) for n, v in cap.evdev_events.items()}
@@ -1100,12 +1274,30 @@ def phase_input(rep, tp, args, tag, record_fh):
 
 
 def watch(tp):
+    res_x, res_y, res_node = evdev_touch_res([n for n, _ in tp.event_nodes])
+    det = JumpDetector(res_x, res_y)
+    marks = []
+    tty = sys.stdin.isatty()
     print(f"watching {tp.hidraw} ({tp.name}) — ^C to stop", flush=True)
+    print(f"  jump predictor at {res_x:g}/{res_y:g} units/mm"
+          + (f" ({res_node})" if res_node else " (assumed)")
+          + ("; press Enter the moment you FEEL a jump and the trace gets a "
+             "mark" if tty else ""), flush=True)
     fd = os.open(tp.hidraw, os.O_RDONLY)
     last_t, last_scan = None, None
     host_deltas, scan_deltas = [], []  # PTP frames only, ms
     try:
         while True:
+            if tty:
+                # Let the user annotate the trace: a felt jump is rare enough
+                # that a marker beats scrolling back through 8 s of frames.
+                readable, _, _ = select.select([fd, 0], [], [])
+                if 0 in readable:
+                    os.read(0, 4096)
+                    marks.append(time.monotonic())
+                    print(C.c(C.Y, f"  <<< MARK {len(marks)}: felt a jump here"),
+                          flush=True)
+                    continue
             data = os.read(fd, 4096)
             t = time.monotonic()
             dt = f"{(t - last_t) * 1e3:7.2f}ms" if last_t else "        "
@@ -1121,8 +1313,11 @@ def watch(tp):
                 last_scan = f["scan_time"]
                 tips = [(fg["cid"], fg["x"], fg["y"])
                         for fg in f["fingers"] if fg["tip"]]
+                hits = det.feed(t, f)
+                note = (C.c(C.R, "  <<< libinput JUMP: " + det.describe(hits[0]))
+                        if hits else "")
                 print(f"{dt}{sdt} PTP cc={f['contact_count']} btn={f['buttons']} "
-                      + " ".join(f"[{c}]{x},{y}" for c, x, y in tips))
+                      + " ".join(f"[{c}]{x},{y}" for c, x, y in tips) + note)
             elif rid == MOUSE_ID and (m := parse_mouse(p)):
                 print(f"{dt}          MOUSE btn={m['buttons']} dx={m['dx']} "
                       f"dy={m['dy']} wheel={m['wheel']} pan={m['pan']}")
@@ -1158,6 +1353,22 @@ def watch(tp):
     elif host_deltas:
         print(f"({len(host_deltas)} PTP frames — keep a finger moving for a "
               f"few seconds for the arrival summary)")
+    if det.frames:
+        col = C.G if not det.real() else C.R
+        print(C.c(col, f"libinput would discard: {jump_detail(det)}"))
+        for j in det.jumps[:10]:
+            print(f"  at +{j['t'] - (det.jumps[0]['t']):.3f}s  {det.describe(j)}")
+        if len(det.jumps) > 10:
+            print(f"  ... and {len(det.jumps) - 10} more")
+    for i, m in enumerate(marks, 1):
+        near = [j for j in det.jumps if abs(j["t"] - m) < 0.5]
+        print(f"MARK {i}: " + (
+            f"{len(near)} predicted discard(s) within 500 ms — closest "
+            f"{min(abs(j['t'] - m) for j in near) * 1e3:.0f} ms away"
+            if near else
+            "NO predicted discard within 500 ms — the jump you felt is not a "
+            "burst-mate; look at pointer acceleration, a >30 ms stall, or a "
+            "lost frame instead"))
 
 
 # ---------------------------------------------------------------- gain
