@@ -526,6 +526,7 @@ class Capture:
         self.hid_events = []    # (t_mono, report_id, payload bytes)
         self.evdev_events = {}  # node -> [(t_mono, type, code, value)]
         self.kernel_ts = set()  # evdev nodes whose stamps are kernel-side
+        self.marks = []         # t_mono of each "I felt it just now" keypress
         self.t_start = self.t_end = None
         self._fds = {}
 
@@ -563,20 +564,54 @@ class Capture:
             except OSError:
                 pass
 
-    def run(self, duration, progress=True):
+    def run(self, duration=None, progress=True, live=None, marks=False):
+        """Capture for `duration` seconds, or until ^C when it is None.
+
+        `live` gets every event as it lands (.hidraw/.evdev/.mark) for the
+        interactive phases; `marks` also watches stdin so Enter timestamps
+        the trace -- a jump the user FEELS is rare enough that a marker
+        beats scrolling back through thousands of frames.
+        """
         self.t_start = time.monotonic()
-        end = self.t_start + duration
+        end = None if duration is None else self.t_start + duration
         next_tick = time.monotonic() + 1
+        watch_stdin = marks and sys.stdin.isatty()
+        fds = list(self._fds) + ([0] if watch_stdin else [])
+        try:
+            self._loop(end, progress, live, watch_stdin, fds, next_tick)
+        except KeyboardInterrupt:
+            print()
+        self.t_end = time.monotonic()
+        if progress:
+            print("\r" + " " * 60 + "\r", end="")
+
+    def _loop(self, end, progress, live, watch_stdin, fds, next_tick):
         while True:
             now = time.monotonic()
-            if now >= end:
+            if end is not None and now >= end:
                 break
             if progress and now >= next_tick:
-                remaining = int(end - now + 0.999)
-                print(f"\r      capturing... {remaining:2d}s left, "
-                      f"{len(self.hid_events)} raw reports", end="", flush=True)
+                if end is None:
+                    print(f"\r      capturing... {len(self.hid_events)} raw "
+                          f"reports, ^C when done", end="", flush=True)
+                else:
+                    print(f"\r      capturing... "
+                          f"{int(end - now + 0.999):2d}s left, "
+                          f"{len(self.hid_events)} raw reports",
+                          end="", flush=True)
                 next_tick = now + 1
-            r, _, _ = select.select(list(self._fds), [], [], min(0.05, end - now))
+            timeout = 0.05 if end is None else min(0.05, end - now)
+            r, _, _ = select.select(fds, [], [], timeout)
+            if watch_stdin and 0 in r:
+                os.read(0, 4096)
+                self.marks.append(time.monotonic())
+                if self.record_fh:
+                    self.record_fh.write(json.dumps({
+                        "t": self.marks[-1], "src": f"mark{self.tag}",
+                        "n": len(self.marks)}) + "\n")
+                if live:
+                    live.mark(len(self.marks), self.marks[-1])
+                r = [fd for fd in r if fd != 0]
             for fd in r:
                 kind, node = self._fds[fd]
                 try:
@@ -591,6 +626,8 @@ class Capture:
                             self.record_fh.write(json.dumps({
                                 "t": t, "src": f"hidraw{self.tag}",
                                 "id": data[0], "data": data[1:].hex()}) + "\n")
+                        if live:
+                            live.hidraw(t, data[0], data[1:])
                 else:
                     kernel = node in self.kernel_ts
                     for off in range(0, len(data) - EVDEV_EVENT_SIZE + 1,
@@ -601,9 +638,8 @@ class Capture:
                         # completion) beats our post-read userspace stamp.
                         te = s + u / 1e6 if kernel else t
                         self.evdev_events[node].append((te, etype, code, value))
-        self.t_end = time.monotonic()
-        if progress:
-            print("\r" + " " * 60 + "\r", end="")
+                        if live:
+                            live.evdev(te, node, etype, code, value)
 
 
 def unwrap_scan_times(raws):
@@ -639,11 +675,62 @@ def unwrap_scan_times(raws):
 # tp_init_jumps): its absence proves nothing and its occurrences cannot be
 # counted. Needs the real device resolution, so it reads units/mm off the
 # evdev node instead of assuming.
+# evdev MT protocol B -- the stream libinput itself consumes.
+ABS_MT_SLOT, ABS_MT_TRACKING_ID = 0x2F, 0x39
+EV_KEY = 0x01
+BTN_LEFT = 0x110
+SYN_REPORT = 0
+
+
+class EvdevFramer:
+    """Reassemble MT protocol B events into one frame per SYN_REPORT.
+
+    The jump predicate belongs on this stream rather than on hidraw:
+    libinput reads evdev, and these stamps are the kernel's (taken at URB
+    completion, no userspace scheduling in them). It matters most over
+    direct BLE, where two frames delivered in one connection event reach
+    uhid ~50 us apart: a userspace stamp that reads them 1 ms apart
+    understates the normalized distance 20-fold and would miss the discard
+    entirely. Over the dongle the pair really is ~1 ms apart, because the
+    two forwarded reports land on separate 1 kHz USB frames.
+    """
+
+    def __init__(self):
+        self.slots = {}   # slot -> {"id", "x", "y"}
+        self.cur = 0
+        self.buttons = 0
+
+    def push(self, t, etype, code, value):
+        """Returns (t, {tracking_id: (x, y)}, buttons) on a frame boundary."""
+        if etype == EV_ABS:
+            if code == ABS_MT_SLOT:
+                self.cur = value
+            elif code == ABS_MT_TRACKING_ID:
+                if value < 0:
+                    self.slots.pop(self.cur, None)
+                else:
+                    self.slots.setdefault(self.cur, {})["id"] = value
+            elif code == ABS_MT_POSITION_X:
+                self.slots.setdefault(self.cur, {})["x"] = value
+            elif code == ABS_MT_POSITION_Y:
+                self.slots.setdefault(self.cur, {})["y"] = value
+        elif etype == EV_KEY and code == BTN_LEFT:
+            self.buttons = value
+        elif etype == EV_SYN and code == SYN_REPORT:
+            contacts = {sl["id"]: (sl["x"], sl["y"]) for sl in self.slots.values()
+                        if {"id", "x", "y"} <= sl.keys()}
+            # Tracking ids are unique per touch, so a lifted finger's state
+            # can never be inherited by the next one that reuses its slot.
+            return t, contacts, (tuple(sorted(contacts)), self.buttons)
+        return None
+
+
 JUMP_REF_S = 0.012
 JUMP_ABS_MM = 20.0
 JUMP_REL_MM = 7.0
 JUMP_EXEMPT_FACTOR = 2.5
 JUMP_BURST_MS = 2.0  # "arrived too early to be its own connection event"
+MARK_WINDOW_S = 0.5  # how close a predicted discard must be to a felt one
 DEFAULT_RES = 12.0
 
 _ABSINFO_LEN = 24  # struct input_absinfo: 6 x int32
@@ -686,37 +773,41 @@ def frame_state(f):
 
 
 class JumpDetector:
-    def __init__(self, res_x=DEFAULT_RES, res_y=DEFAULT_RES):
+    def __init__(self, res_x=DEFAULT_RES, res_y=DEFAULT_RES, source="evdev"):
         self.res_x, self.res_y = res_x, res_y
+        self.source = source  # "evdev" (kernel stamps) or "hidraw" (userspace)
         self.touches = {}     # contact id -> libinput's per-touch history
         self.prev_state = None
         self.frames = 0
         self.jumps = []
 
     def feed(self, t, f):
-        """Feed one PTP frame; returns this frame's jumps (usually none)."""
+        """One PTP frame off hidraw. Userspace-stamped, so prefer
+        feed_contacts() on the evdev stream (see EvdevFramer)."""
+        contacts = {fg["cid"]: (fg["x"], fg["y"])
+                    for fg in f["fingers"] if fg["tip"]}
+        return self.feed_contacts(t, contacts, frame_state(f))
+
+    def feed_contacts(self, t, contacts, state):
+        """Feed one frame: {contact id: (x, y)} plus the state whose change
+        makes a frame urgent. Returns this frame's jumps (usually none)."""
         self.frames += 1
-        state = frame_state(f)
         urgent = self.prev_state is not None and state != self.prev_state
         self.prev_state = state
 
-        hits, live = [], set()
-        for fg in f["fingers"]:
-            if not fg["tip"]:
-                continue
-            cid = fg["cid"]
-            live.add(cid)
+        hits = []
+        for cid, (cx, cy) in contacts.items():
             st = self.touches.get(cid)
             if st is None:
                 # history.count == 0: libinput zeroes last_delta_mm and bails
-                self.touches[cid] = {"x": fg["x"], "y": fg["y"], "t": t,
+                self.touches[cid] = {"x": cx, "y": cy, "t": t,
                                      "last_mm": 0.0, "n": 0}
                 continue
             st["n"] += 1
             tdelta = t - st["t"]
-            dx = abs(fg["x"] - st["x"]) / self.res_x
-            dy = abs(fg["y"] - st["y"]) / self.res_y
-            st["x"], st["y"], st["t"] = fg["x"], fg["y"], t
+            dx = abs(cx - st["x"]) / self.res_x
+            dy = abs(cy - st["y"]) / self.res_y
+            st["x"], st["y"], st["t"] = cx, cy, t
             if tdelta <= 0 or tdelta > JUMP_REF_S * JUMP_EXEMPT_FACTOR:
                 continue  # exempt, and last_delta_mm keeps its old value
             abs_mm = math.hypot(dx, dy) * JUMP_REF_S / tdelta
@@ -731,7 +822,7 @@ class JumpDetector:
                        "rel_mm": rel_mm, "urgent": urgent, "start": st["n"] == 1}
                 hits.append(hit)
                 self.jumps.append(hit)
-        for cid in [c for c in self.touches if c not in live]:
+        for cid in [c for c in self.touches if c not in contacts]:
             del self.touches[cid]
         return hits
 
@@ -894,20 +985,6 @@ def analyze_motion(cap, rep, res_prefix):
         maxcc = max(f["contact_count"] for _, f in ptp)
         out["max_contact_count"] = maxcc
 
-        # The motion libinput will actually throw away (see JumpDetector).
-        # This is the number the user feels; arrival histograms only imply it.
-        res_x, res_y, res_node = evdev_touch_res([n for n, _ in cap.tp.event_nodes])
-        det = JumpDetector(res_x, res_y)
-        for t, f in ptp:
-            det.feed(t, f)
-        rep.info(f"jump predictor: {res_x:g}/{res_y:g} units/mm"
-                 + (f" from {res_node}" if res_node
-                    else " (no evdev resolution, assumed)"))
-        rep.check("no motion libinput would discard as a cursor jump",
-                  not det.real(), jump_detail(det), warn_only=True)
-        for j in det.jumps[:6]:
-            rep.info("  " + det.describe(j))
-        out["libinput_jumps"] = det.summary()
 
     # evdev side
     total_ev = {n: len(v) for n, v in cap.evdev_events.items()}
@@ -943,6 +1020,51 @@ def analyze_motion(cap, rep, res_prefix):
                           f"n={grid['n']})")
             rep.info(f"delivery grid: {grid['verdict']}{detail}{caveat}")
             out["delivery_grid"] = grid
+
+    # The motion libinput will actually throw away -- the artifact the user
+    # feels, which the arrival histogram only implies. Fed from the evdev
+    # stream whenever the kernel stamped it: that is the stream libinput
+    # reads, and burst-mates are exactly where a userspace stamp lies.
+    res_x, res_y, res_node = evdev_touch_res([n for n, _ in cap.tp.event_nodes])
+    tp_node = next((n for n in mt_nodes if n in cap.kernel_ts), None)
+    det = JumpDetector(res_x, res_y, "evdev" if tp_node else "hidraw")
+    if tp_node:
+        framer = EvdevFramer()
+        for ev in cap.evdev_events[tp_node]:
+            frame = framer.push(*ev)
+            if frame:
+                det.feed_contacts(*frame)
+    else:
+        for t, f in ptp:
+            det.feed(t, f)
+    if det.frames:
+        rep.info(f"jump predictor: {det.frames} frames off "
+                 + (f"{tp_node} (kernel-stamped)" if tp_node else
+                    "hidraw (USERSPACE-stamped: burst-mates read wider than "
+                    "they are, so discards are under-counted)")
+                 + f", {res_x:g}/{res_y:g} units/mm"
+                 + (f" from {res_node}" if res_node else " (assumed)"))
+        rep.check("no motion libinput would discard as a cursor jump",
+                  not det.real(), jump_detail(det), warn_only=True)
+        for j in det.jumps[:6]:
+            rep.info("  " + det.describe(j))
+        out["libinput_jumps"] = det.summary()
+
+    # Correlate what the user FELT with what the predictor saw.
+    for i, m in enumerate(cap.marks, 1):
+        near = sorted((j for j in det.jumps if abs(j["t"] - m) < MARK_WINDOW_S),
+                      key=lambda j: abs(j["t"] - m))
+        rep.info(f"MARK {i} (+{m - cap.t_start:.1f}s): " + (
+            f"{len(near)} predicted discard(s) within "
+            f"{MARK_WINDOW_S * 1e3:.0f}ms, closest "
+            f"{abs(near[0]['t'] - m) * 1e3:.0f}ms away — {det.describe(near[0])}"
+            if near else
+            f"NO predicted discard within {MARK_WINDOW_S * 1e3:.0f}ms, so what "
+            f"you felt is not a burst-mate: look for a >30ms stall (exempt "
+            f"from libinput's jump test), pointer acceleration, or a frame "
+            f"lost outright"))
+    if cap.marks:
+        out["marks_s"] = [round(m - cap.t_start, 3) for m in cap.marks]
     rep.data[res_prefix] = out
     return out
 
