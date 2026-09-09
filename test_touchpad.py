@@ -32,6 +32,15 @@ Phases:
               shows up, pressing Enter each time you FEEL a jump; every
               mark is then correlated with what the predictor saw. For an
               artifact too rare to catch in an 8 s window.
+  6 sweeps    NON-interactive, no finger needed: the KEYBOARD generates
+              touchpad frames itself (aster --tp-sweep) on an absolute tick
+              grid and forwards them through the real passthrough. Because
+              the source count and cadence are then known exactly, frame
+              loss is measured rather than estimated and every arrival
+              irregularity belongs to the chain -- which is what a human
+              finger can never establish. A plan of intervals brackets the
+              7.5 ms connection interval both our centrals grant.
+              Needs aster + firmware with the inject opcodes (0x93-0x95).
 
 Everything from one command; each interactive phase takes 's' to skip.
 --out DIR collects the transcript, the JSON summary and a JSONL of every
@@ -53,6 +62,14 @@ Typical usage:
                                          # with an arrival-delta summary)
   sudo ./test_touchpad.py --dongle --watch   # same via the USB-A BT dongle
   sudo ./test_touchpad.py --record m.jsonl --json result.json
+
+  # Synthetic sweeps -- no finger, nothing to skip. The interesting one is
+  # running the same plan against each path and diffing the summaries:
+  sudo ./test_touchpad.py --sweep                    # keyboard's own USB
+  sudo ./test_touchpad.py --sweep --dongle           # BLE -> dongle -> USB
+  sudo ./test_touchpad.py --sweep --ble-only         # BLE direct to this host
+  sudo ./test_touchpad.py --sweep --sweep-interval 7500   # one interval only
+  sudo ./test_touchpad.py --sweep --dongle --out runs/dongle-sweep
 
 hidraw access needs root (the script re-execs itself with sudo if needed;
 --no-sudo disables that). Enumeration alone works as a plain user.
@@ -1431,6 +1448,245 @@ def phase_input(rep, tp, args, tag, record_fh):
         rep.skip("keyboard interference capture", "user skipped")
 
 
+# ------------------------------------------------------- synthetic sweeps
+
+# Default plan for --sweep, ordered so the benign case runs first and the
+# link-outrunning one last. The interval is the whole variable: the keyboard
+# emits these on an absolute tick grid, so each row asks "what does the chain
+# do with a PERFECTLY regular source at this rate?" -- which is the question
+# a human finger cannot pose.
+#
+# 7.5 ms is what both our centrals grant as a connection interval, so the
+# rows bracket it deliberately: comfortably inside it, just above it, exactly
+# on it, the pad's own 140 Hz period, and well past it.
+SWEEP_PLAN = [
+    #  label                                        interval_us  frames
+    ("16.0ms  62 Hz  well inside the event grid",         16000,  200),
+    (" 8.0ms 125 Hz  just above a 7.5ms interval",         8000,  400),
+    (" 7.5ms 133 Hz  exactly the granted interval",        7500,  400),
+    (" 7.1ms 141 Hz  the pad's own 140Hz period",          7100,  400),
+    (" 4.0ms 250 Hz  deliberately outrunning the link",    4000,  400),
+]
+
+# Path swept across the pad, in the descriptor's logical units (x 0-796,
+# y 0-998). Inset from the edges so no frame lands on a coordinate a host
+# might clamp or treat as an edge gesture.
+SWEEP_X0, SWEEP_Y0 = 50, 500
+SWEEP_X1, SWEEP_Y1 = 750, 500
+
+
+def aster_run(args, *argv, timeout=30):
+    """Run aster with `argv`, returning (ok, output)."""
+    if not args.aster:
+        return False, "no aster binary"
+    cmd = [args.aster, "v1"] + list(argv)
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, str(e)
+    out = (p.stdout + p.stderr).strip()
+    return p.returncode == 0, out
+
+
+def sweep_endpoint_for(args):
+    """Which keyboard endpoint has to be selected for us to see the frames.
+
+    The keyboard routes touchpad frames to exactly one transport, so the node
+    being watched dictates the setting: its own USB interface needs `usb`,
+    and both the dongle's passthrough and a direct BLE link need `ble`.
+    """
+    return "usb" if not (args.dongle or args.ble_only or args.ble) else "ble"
+
+
+def run_one_sweep(rep, tp, args, spec, record_fh, tag):
+    """Fire one keyboard-generated sweep and analyze what arrived."""
+    label, interval_us, frames = spec
+    expect_s = (frames - 1) * interval_us / 1e6
+
+    rep.info(f"sweep {label}: {frames} frames, "
+             f"({SWEEP_X0},{SWEEP_Y0}) -> ({SWEEP_X1},{SWEEP_Y1}), "
+             f"~{expect_s:.2f}s")
+    with Capture(tp, record_fh, tag) as cap:
+        # aster returns only after waiting the run out, so start it alongside
+        # the capture rather than before it. Slack on both ends covers the
+        # command's own round-trip and the final frame's send.
+        proc = subprocess.Popen(
+            [args.aster, "v1",
+             "--tp-sweep", f"{SWEEP_X0},{SWEEP_Y0}:{SWEEP_X1},{SWEEP_Y1}",
+             "--tp-sweep-frames", str(frames),
+             "--tp-sweep-interval", str(interval_us)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        cap.run(expect_s + 0.6)
+        try:
+            _, err = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            _, err = proc.communicate()
+        if proc.returncode != 0:
+            rep.check(f"sweep accepted ({label})", False,
+                      (err or "").strip() or f"aster exit {proc.returncode}")
+            return None
+
+    out = analyze_motion(cap, rep, f"sweep_{interval_us}us_{tag}")
+
+    # The two checks a human finger cannot support: the source count and
+    # cadence are known exactly, so loss and pacing are measured, not
+    # estimated. One extra report is the lift-off frame.
+    ptp = [(t, f) for t, f in
+           ((t, parse_ptp(p)) for t, rid, p in cap.hid_events if rid == PTP_ID)
+           if f]
+    got, want = len(ptp), frames + 1
+    lost = want - got
+    if got > want:
+        # More frames than were generated means a second source: the physical
+        # pad is streaming too (a resting palm reports continuously), and its
+        # frames interleave with ours -- which also makes the scan-time
+        # median meaningless, since the two counters are unrelated.
+        rep.check(f"only injected frames arrived ({label})", False,
+                  f"{got} frames for {want} requested — the physical pad is "
+                  f"streaming as well; results for this row are contaminated")
+    else:
+        rep.check(f"all frames arrived ({label})", lost <= 0,
+                  f"{got}/{want} frames" + (f", {lost} lost" if lost else ""),
+                  warn_only=True)
+
+    # Device scan-time median validates the GENERATOR, which is what makes
+    # every other number in the row trustworthy. It is stamped before the
+    # frame enters the transport, so it must reflect the requested interval
+    # however badly the chain behaves downstream.
+    #
+    # The subtlety: the median is over SURVIVING frames. Drop every other
+    # frame and consecutive survivors are 2x the interval apart, so the
+    # honest test is "an integer multiple", with the multiple reported --
+    # at which point it doubles as a second, independent read on loss.
+    scan_med = (out or {}).get("scan_med_ms")
+    delivered_hz = (out or {}).get("rate_overall_hz")
+    mult = None
+    if scan_med:
+        want_ms = interval_us / 1000.0
+        mult = max(1, round(scan_med / want_ms))
+        tol = max(0.35, want_ms * 0.05) * mult
+        rep.check(f"source cadence held ({label})",
+                  abs(scan_med - want_ms * mult) <= tol,
+                  f"device stamps {scan_med:.2f}ms apart = {mult}x the "
+                  f"{want_ms:.2f}ms asked for"
+                  + (f" ({mult - 1} in {mult} frames never left the keyboard "
+                     f"or died in transit)" if mult > 1 else ""))
+    return {"label": label, "interval_us": interval_us,
+            "frames_requested": want, "frames_arrived": got, "lost": lost,
+            "scan_med_ms": scan_med, "scan_multiple": mult,
+            "delivered_hz": delivered_hz}
+
+
+def phase_sweep(rep, tp, args, tag, record_fh):
+    """Non-interactive: drive the passthrough with synthetic frames.
+
+    Every other input phase needs a finger, which makes the source cadence an
+    unknown and leaves "is this the pad, the firmware, the link or the host?"
+    unanswerable. The keyboard generating the frames removes that unknown --
+    see aster's plans/touchpad-input-injection.md.
+    """
+    rep.banner(f"6. synthetic sweeps ({tag})")
+    if not args.aster:
+        rep.skip("synthetic sweeps", "no aster binary (--aster PATH)")
+        return
+    if tp.hidraw is None:
+        rep.skip("synthetic sweeps", "no hidraw node")
+        return
+    if not os.access(tp.hidraw, os.R_OK):
+        rep.check("open hidraw for reading", False, "permission denied")
+        return
+
+    want_ep = sweep_endpoint_for(args)
+    ok, out = aster_run(args, "--endpoint", want_ep)
+    if not ok:
+        rep.check("select keyboard endpoint", False, f"--endpoint {want_ep}: {out}")
+        return
+    rep.info(f"keyboard endpoint set to {want_ep}; watching {tp.hidraw}")
+    # BLE needs the link to settle before the first frame, or the opening
+    # rows measure reconnection rather than pacing.
+    time.sleep(1.5 if want_ep == "ble" else 0.5)
+
+    pin_cstates()
+
+    # Put the physical pad to sleep for the duration. Injection does not go
+    # through the pad at all, so this costs nothing -- and without it a
+    # resting palm (which the pad reports continuously, tip set and
+    # confidence clear, at a fixed position) interleaves its frames with the
+    # synthetic ones and destroys both the frame count and the scan-time
+    # median. SLEEP, not OFF: OFF also suspends the passthrough driver.
+    slept, _ = aster_run(args, "--touchpad-power", "sleep")
+    if slept:
+        time.sleep(0.3)
+        with Capture(tp, None, tag) as quiet:
+            quiet.run(0.5, progress=False)
+        stray = [parse_ptp(pl) for _t, rid, pl in quiet.hid_events if rid == PTP_ID]
+        stray = [f for f in stray if f]
+        if not rep.check("physical pad quiet before injecting", not stray,
+                         f"{len(stray)} frame(s) still arriving in 0.5s",
+                         warn_only=True) and stray:
+            f = stray[-1]["fingers"][0]
+            rep.info(C.c(C.Y,
+                f"something is resting on the pad (contact id {f['cid']} at "
+                f"x={f['x']} y={f['y']}, tip={f['tip']} "
+                f"confidence={f['confidence']}) and the pad keeps reporting it "
+                f"even asleep — clear the pad and re-run, or the counts below "
+                f"mix two sources"))
+    else:
+        rep.skip("quiesce the physical pad", "touchpad-power set failed")
+
+    rows = []
+    try:
+        for spec in (SWEEP_PLAN[:2] if args.quick_input else SWEEP_PLAN):
+            row = run_one_sweep(rep, tp, args, spec, record_fh, tag)
+            if row:
+                rows.append(row)
+            # Let the link drain between rows so one row's backlog is not the
+            # next row's opening jitter.
+            time.sleep(0.4)
+    finally:
+        # Always hand the pad back, including on ^C -- a pad left asleep looks
+        # exactly like a dead one to whoever picks the unit up next.
+        if slept:
+            aster_run(args, "--touchpad-power", "on")
+        # And never leave the host holding a contact from a killed sweep.
+        aster_run(args, "--tp-inject-up")
+    rep.data[f"sweeps_{tag}"] = rows
+
+    if len(rows) >= 2:
+        print()
+        rep.info("summary — the source cadence is exact in every row, so the "
+                 "arrived count is loss and nothing else:")
+        w = max(len(r["label"]) for r in rows) + 2
+        rep.info(f"  {'requested':<{w}} {'arrived':>11} {'loss':>6} "
+                 f"{'delivered':>10} {'stamp':>9}")
+        for r in rows:
+            stamp = f"{r['scan_med_ms']:.2f}ms" if r["scan_med_ms"] else "-"
+            arrived = f"{r['frames_arrived']}/{r['frames_requested']}"
+            loss = (f"{100.0 * r['lost'] / r['frames_requested']:.0f}%"
+                    if r["frames_requested"] and r["lost"] > 0 else "-")
+            hz = f"{r['delivered_hz']:.0f} Hz" if r.get("delivered_hz") else "-"
+            rep.info(f"  {r['label']:<{w}} {arrived:>11} {loss:>6} "
+                     f"{hz:>10} {stamp:>9}")
+
+        # A delivered rate that stops rising while the requested rate keeps
+        # rising IS the finding: the chain has a ceiling and everything above
+        # it is discarded. Worth stating outright, because the per-row checks
+        # only ever see one row.
+        hz = [r["delivered_hz"] for r in rows if r.get("delivered_hz")]
+        if len(hz) >= 3:
+            top = max(hz)
+            capped = [r for r in rows if r.get("delivered_hz")
+                      and r["delivered_hz"] > 0.92 * top and r["lost"] > 0]
+            if len(capped) >= 2:
+                rep.info(C.c(C.Y,
+                    f"  -> delivery ceiling ~{top:.0f} Hz: "
+                    f"{len(capped)} rows at different source rates all land "
+                    f"there and shed the surplus, so the limit is the chain's, "
+                    f"not the source's. Compare 1/7.5ms = 133 events/s, the "
+                    f"connection interval both our centrals grant."))
+
+
 class LiveEcho:
     """Live annotation for the open-ended phases.
 
@@ -1844,6 +2100,11 @@ def run_transport(rep, args, bus, tag, record_fh):
         return None
     if bus == BUS_USB:
         maybe_sudo(args, tp)
+    # --sweep is the non-interactive subset: enumeration to find the node,
+    # then synthetic frames. No feature round-trips, no prompts.
+    if args.sweep:
+        phase_sweep(rep, tp, args, tag, record_fh)
+        return tp
     phase_features(rep, tp, args, tag)
     if not args.quick:
         phase_input(rep, tp, args, tag, record_fh)
@@ -1851,6 +2112,8 @@ def run_transport(rep, args, bus, tag, record_fh):
             phase_gain(rep, tp, args, tag)
         if not args.no_hunt:
             phase_jump_hunt(rep, tp, args, tag, record_fh)
+        if not args.no_sweep:
+            phase_sweep(rep, tp, args, tag, record_fh)
     return tp
 
 
@@ -2018,6 +2281,21 @@ def main():
                     help="echo every frame during the open-ended phases "
                          "(default: only jumps and marks; every frame is in "
                          "frames.jsonl either way)")
+    ap.add_argument("--sweep", action="store_true",
+                    help="ONLY the synthetic-sweep phase: the keyboard "
+                         "generates touchpad frames itself on an exact tick "
+                         "grid and forwards them through the real "
+                         "passthrough, so the source cadence is known and "
+                         "every irregularity belongs to the chain. Fully "
+                         "non-interactive -- no finger needed. Combine with "
+                         "--dongle or --ble-only to sweep that path.")
+    ap.add_argument("--no-sweep", action="store_true",
+                    help="skip the synthetic-sweep phase of a normal run")
+    ap.add_argument("--sweep-interval", type=int, metavar="US",
+                    help="run ONE sweep at this interval (microseconds) "
+                         "instead of the default plan")
+    ap.add_argument("--sweep-frames", type=int, default=400, metavar="N",
+                    help="frames per sweep for --sweep-interval (default 400)")
     ap.add_argument("--no-gain", action="store_true",
                     help="skip the pointer-gain phase of a normal run")
     ap.add_argument("--no-hunt", action="store_true",
@@ -2054,7 +2332,20 @@ def main():
         if args.ble or args.ble_only or args.watch_ble:
             sys.exit("--dongle is USB-only: the BLE leg terminates at the "
                      "dongle, the host only sees its USB interfaces")
-        args.aster = None  # aster talks to the keyboard, not the dongle
+        # aster talks to the keyboard, not the dongle, so its endpoint info is
+        # not about the device being enumerated here -- except under --sweep,
+        # which drives the keyboard on purpose while watching what comes out
+        # the dongle. That is the whole point of sweeping the dongle path.
+        if not args.sweep:
+            args.aster = None
+
+    if args.sweep_interval:
+        if not args.sweep:
+            sys.exit("--sweep-interval only applies to --sweep")
+        global SWEEP_PLAN
+        rate = 1e6 / args.sweep_interval
+        SWEEP_PLAN = [(f"{args.sweep_interval/1000:5.1f}ms {rate:3.0f} Hz  "
+                       f"requested", args.sweep_interval, args.sweep_frames)]
 
     if args.out:
         # A finished run leaves result.json behind; never clobber one. The
