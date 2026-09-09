@@ -23,10 +23,20 @@ Phases:
               host clock drift, dropped-vs-coalesced-frame estimate, X/Y
               coverage, contact count, whether hid-multitouch turned it
               into evdev events, and -- replaying libinput's own
-              tp_detect_jumps() over the frames -- exactly which motion
-              libinput will DISCARD as a cursor jump (libinput's own
-              warning is rate-limited to 5 per 24 h, so it can't be
-              counted from the log).
+              tp_detect_jumps() over the kernel-stamped evdev frames --
+              exactly which motion libinput will DISCARD as a cursor jump
+              (libinput's own warning is rate-limited to 5 per 24 h, so it
+              can't be counted from the log).
+  4 gain      Interactive: libinput pointer output per mm of finger travel.
+  5 jump hunt Interactive, open-ended: move the finger until the artifact
+              shows up, pressing Enter each time you FEEL a jump; every
+              mark is then correlated with what the predictor saw. For an
+              artifact too rare to catch in an 8 s window.
+
+Everything from one command; each interactive phase takes 's' to skip.
+--out DIR collects the transcript, the JSON summary and a JSONL of every
+frame in one directory, which is the thing worth keeping: any analysis can
+be re-run offline from the frames, including ones not written yet.
   4 ble       (--ble) repeat 2+3 against the Bluetooth HOGP hid device,
               so USB and BLE timings can be compared.
 
@@ -269,6 +279,32 @@ class C:
     @classmethod
     def c(cls, code, s):
         return f"{code}{s}{cls.OFF}" if cls.on else s
+
+
+ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+
+
+class Tee:
+    """Mirror stdout into the run's transcript, minus the colour codes, so
+    one --out directory holds everything a run produced."""
+
+    def __init__(self, stream, path):
+        self.stream = stream
+        self.fh = open(path, "w")
+
+    def write(self, sdata):
+        self.stream.write(sdata)
+        self.fh.write(ANSI_RE.sub("", sdata))
+
+    def flush(self):
+        self.stream.flush()
+        self.fh.flush()
+
+    def isatty(self):
+        return self.stream.isatty()
+
+    def fileno(self):
+        return self.stream.fileno()
 
 
 class Report:
@@ -1395,102 +1431,89 @@ def phase_input(rep, tp, args, tag, record_fh):
         rep.skip("keyboard interference capture", "user skipped")
 
 
-def watch(tp):
-    res_x, res_y, res_node = evdev_touch_res([n for n, _ in tp.event_nodes])
-    det = JumpDetector(res_x, res_y)
-    marks = []
-    tty = sys.stdin.isatty()
-    print(f"watching {tp.hidraw} ({tp.name}) — ^C to stop", flush=True)
-    print(f"  jump predictor at {res_x:g}/{res_y:g} units/mm"
-          + (f" ({res_node})" if res_node else " (assumed)")
-          + ("; press Enter the moment you FEEL a jump and the trace gets a "
-             "mark" if tty else ""), flush=True)
-    fd = os.open(tp.hidraw, os.O_RDONLY)
-    last_t, last_scan = None, None
-    host_deltas, scan_deltas = [], []  # PTP frames only, ms
-    try:
-        while True:
-            if tty:
-                # Let the user annotate the trace: a felt jump is rare enough
-                # that a marker beats scrolling back through 8 s of frames.
-                readable, _, _ = select.select([fd, 0], [], [])
-                if 0 in readable:
-                    os.read(0, 4096)
-                    marks.append(time.monotonic())
-                    print(C.c(C.Y, f"  <<< MARK {len(marks)}: felt a jump here"),
-                          flush=True)
-                    continue
-            data = os.read(fd, 4096)
-            t = time.monotonic()
-            dt = f"{(t - last_t) * 1e3:7.2f}ms" if last_t else "        "
-            rid, p = data[0], data[1:]
-            if rid == PTP_ID and (f := parse_ptp(p)):
-                if last_t is not None:
-                    host_deltas.append((t - last_t) * 1e3)
-                sdt = ""
-                if last_scan is not None:
-                    d = (f["scan_time"] - last_scan) & 0xFFFF
-                    sdt = f" scan+{d * SCAN_TIME_UNIT_S * 1e3:6.2f}ms"
-                    scan_deltas.append(d * SCAN_TIME_UNIT_S * 1e3)
-                last_scan = f["scan_time"]
+class LiveEcho:
+    """Live annotation for the open-ended phases.
+
+    The jump flag is fed from evdev (kernel stamps, the stream libinput
+    reads), so it lands just after the hidraw line for the same frame.
+    Per-frame echo is opt-in (--trace): at 140 Hz it floods the terminal and
+    the transcript, and every frame is in the JSONL anyway."""
+
+    def __init__(self, tp_node, res_x, res_y, trace=False):
+        self.tp_node = tp_node
+        self.trace = trace
+        self.det = JumpDetector(res_x, res_y, "evdev")
+        self.framer = EvdevFramer()
+        self.last_t = self.last_scan = self.t0 = None
+
+    def hidraw(self, t, rid, payload):
+        if self.t0 is None:
+            self.t0 = t
+        # PTP-to-PTP delta, so a mouse-mode report in between doesn't reset it
+        dt = f"{(t - self.last_t) * 1e3:7.2f}ms" if self.last_t else "         "
+        if rid == PTP_ID:
+            f = parse_ptp(payload)
+            if not f:
+                return
+            sdt = "             "
+            if self.last_scan is not None:
+                d = (f["scan_time"] - self.last_scan) & 0xFFFF
+                sdt = f" scan+{d * SCAN_TIME_UNIT_S * 1e3:6.2f}ms"
+            self.last_scan, self.last_t = f["scan_time"], t
+            if self.trace:
                 tips = [(fg["cid"], fg["x"], fg["y"])
                         for fg in f["fingers"] if fg["tip"]]
-                hits = det.feed(t, f)
-                note = (C.c(C.R, "  <<< libinput JUMP: " + det.describe(hits[0]))
-                        if hits else "")
-                print(f"{dt}{sdt} PTP cc={f['contact_count']} btn={f['buttons']} "
-                      + " ".join(f"[{c}]{x},{y}" for c, x, y in tips) + note)
-            elif rid == MOUSE_ID and (m := parse_mouse(p)):
-                print(f"{dt}          MOUSE btn={m['buttons']} dx={m['dx']} "
-                      f"dy={m['dy']} wheel={m['wheel']} pan={m['pan']}")
-            else:
-                print(f"{dt} id=0x{rid:02x} {p.hex()}")
-            last_t = t
-    except KeyboardInterrupt:
-        print()
-    finally:
-        os.close(fd)
-    # Summary: reproduces a libinput debug-events "7 ms / 15 ms alternation"
-    # report without libinput, and separates pad timing from delivery timing.
-    cont = [d for d in host_deltas if d < 100]  # drop lift-off pauses
-    if len(cont) >= 20:
-        print("(watch stamps arrivals in userspace after printing each line "
-              "-- ms-scale stats only; run the motion phase for kernel-"
-              "stamped grid/jitter numbers)")
-        print(f"PTP host arrival ({len(cont)} deltas): {stats_line(cont)}")
-        print(f"  histogram: {delta_histogram(cont)}")
-        reg = arrival_regularity(cont)
-        print(f"  regularity: {regularity_summary(reg)}")
-        if reg.get("beat"):
-            print(C.c(C.Y, f"  {BEAT_HINT}"))
-        scont = [d for d in scan_deltas if 0 < d < 100]
-        if scont:
-            med = statistics.median(scont)
-            dbl = sum(1 for d in scont if d > 1.75 * med)
-            print(f"pad scan-time delta: med {med:.2f}ms "
-                  f"({1000 / med:.0f} Hz at the pad); {dbl}/{len(scont)} "
-                  f"deltas >1.75x median ({100 * dbl / len(scont):.0f}%) = "
-                  f"frames coalesced or lost before reaching the host")
-            print(f"  histogram: {delta_histogram(scont)}")
-    elif host_deltas:
-        print(f"({len(host_deltas)} PTP frames — keep a finger moving for a "
-              f"few seconds for the arrival summary)")
-    if det.frames:
-        col = C.G if not det.real() else C.R
-        print(C.c(col, f"libinput would discard: {jump_detail(det)}"))
-        for j in det.jumps[:10]:
-            print(f"  at +{j['t'] - (det.jumps[0]['t']):.3f}s  {det.describe(j)}")
-        if len(det.jumps) > 10:
-            print(f"  ... and {len(det.jumps) - 10} more")
-    for i, m in enumerate(marks, 1):
-        near = [j for j in det.jumps if abs(j["t"] - m) < 0.5]
-        print(f"MARK {i}: " + (
-            f"{len(near)} predicted discard(s) within 500 ms — closest "
-            f"{min(abs(j['t'] - m) for j in near) * 1e3:.0f} ms away"
-            if near else
-            "NO predicted discard within 500 ms — the jump you felt is not a "
-            "burst-mate; look at pointer acceleration, a >30 ms stall, or a "
-            "lost frame instead"))
+                print(f"  +{t - self.t0:7.3f}s {dt}{sdt} "
+                      f"cc={f['contact_count']} btn={f['buttons']} "
+                      + " ".join(f"[{c}]{x},{y}" for c, x, y in tips), flush=True)
+        elif self.trace and rid == MOUSE_ID and (m := parse_mouse(payload)):
+            print(f"  +{t - self.t0:7.3f}s {dt}              "
+                  f"MOUSE btn={m['buttons']} dx={m['dx']} dy={m['dy']}", flush=True)
+
+    def evdev(self, t, node, etype, code, value):
+        if node != self.tp_node:
+            return
+        frame = self.framer.push(t, etype, code, value)
+        if frame:
+            for j in self.det.feed_contacts(*frame):
+                if not j["start"]:
+                    print(C.c(C.R, "    <<< libinput JUMP: "
+                              + self.det.describe(j)), flush=True)
+
+    def mark(self, n, t):
+        print(C.c(C.Y, f"    <<< MARK {n}: felt a jump here"), flush=True)
+
+
+def phase_jump_hunt(rep, tp, args, tag, record_fh, title="5. jump hunt"):
+    """Open-ended capture: hunt an artifact that is too rare for an 8 s
+    window, with the user marking each one they feel."""
+    rep.banner(f"{title} ({tag})")
+    if tp.hidraw is None or not os.access(tp.hidraw, os.R_OK):
+        rep.skip("jump hunt", "no readable hidraw node")
+        return None
+    if not sys.stdin.isatty():
+        # Open-ended and marker-driven: without a terminal it would just
+        # wait for a ^C that no one can send.
+        rep.skip("jump hunt", "needs an interactive terminal")
+        return None
+    pin_cstates()
+    res_x, res_y, res_node = evdev_touch_res([n for n, _ in tp.event_nodes])
+    tp_node = next((n for n, name in tp.event_nodes if "Touchpad" in name),
+                   tp.event_nodes[0][0] if tp.event_nodes else None)
+    rep.info(f"jump predictor at {res_x:g}/{res_y:g} units/mm"
+             + (f" ({res_node})" if res_node else " (assumed)")
+             + (f", frames from {tp_node}" if tp_node else ""))
+    if not ask("JUMP HUNT: move ONE finger around the pad and keep going; "
+               "press Enter EVERY time you feel a jump; ^C when done"):
+        rep.skip("jump hunt", "user skipped")
+        return None
+    echo = LiveEcho(tp_node, res_x, res_y, trace=args.trace)
+    with Capture(tp, record_fh, tag) as cap:
+        cap.run(None, progress=not args.trace, live=echo, marks=True)
+    rep.info(f"captured {len(cap.hid_events)} reports over "
+             f"{cap.t_end - cap.t_start:.1f}s, {len(cap.marks)} mark(s)")
+    analyze_motion(cap, rep, f"jumphunt_{tag}")
+    return cap
 
 
 # ---------------------------------------------------------------- gain
@@ -1571,7 +1594,20 @@ def gain_mode(args):
     print("gain measurement targets:")
     for t in targets:
         print(f"  {t['tag']}: hidraw={t['dev'].hidraw} evdev={t['node']}")
+    results = run_gain_targets(targets, args, args.out)
+    if "usb" in results and "ble" in results and results["usb"][1]:
+        u, b = results["usb"], results["ble"]
+        print(f"\n  BLE/USB ratio: unaccelerated {b[1]/u[1]:.2f}x, "
+              f"accelerated {b[2]/u[2]:.2f}x  ({args.gain_profile} profile)")
+        print("  <1.0 means the BLE pointer genuinely travels less per mm "
+              "of finger motion at the libinput level.")
+    return 0
 
+
+def run_gain_targets(targets, args, out_dir=None, prompt_user=True):
+    """Run libinput debug-events against each target while the user swipes,
+    and report pointer output per mm of finger travel. Returns
+    {tag: (travel_mm, unaccel_per_mm, accel_per_mm)}."""
     procs = []
     for t in targets:
         p = subprocess.Popen(
@@ -1586,19 +1622,21 @@ def gain_mode(args):
         t["motion_lines"] = 0
         t["event_types"] = {}
         t["samples"] = []
-        logpath = f"/tmp/libinput_gain_{t['tag']}.log"
+        logpath = os.path.join(out_dir or "/tmp",
+                               f"libinput_gain_{t['tag']}.log")
         t["rawlog"] = open(logpath, "wb")
         t["rawlog_path"] = logpath
         t["fd"] = os.open(t["dev"].hidraw, os.O_RDONLY | os.O_NONBLOCK)
         t["hid_events"] = []
     time.sleep(0.5)  # let libinput contexts settle
 
-    print(f"\n  >>> Swipe ONE finger around the pad continuously for "
-          f"{args.duration:.0f}s (big slow circles)")
-    try:
-        input("      Press Enter to start... ")
-    except EOFError:
-        pass
+    if prompt_user:
+        print(f"\n  >>> Swipe ONE finger around the pad continuously for "
+              f"{args.duration:.0f}s (big slow circles)")
+        try:
+            input("      Press Enter to start... ")
+        except EOFError:
+            pass
     end = time.monotonic() + args.duration
     fd_map = {t["fd"]: t for t in targets}
     out_map = {t["proc"].stdout.fileno(): t for t in targets}
@@ -1660,13 +1698,35 @@ def gain_mode(args):
         print(f"  {t['tag']:6} {len(t['hid_events']):7} {mm:8.1f}mm "
               f"{t['motion_lines']:7} {t['unaccel']:9.1f} {t['accel']:9.1f} "
               f"{ua:9.3f} {ac:8.3f}")
-    if "usb" in results and "ble" in results and results["usb"][1]:
-        u, b = results["usb"], results["ble"]
-        print(f"\n  BLE/USB ratio: unaccelerated {b[1]/u[1]:.2f}x, "
-              f"accelerated {b[2]/u[2]:.2f}x  ({args.gain_profile} profile)")
-        print("  <1.0 means the BLE pointer genuinely travels less per mm "
-              "of finger motion at the libinput level.")
-    return 0
+    return results
+
+
+def phase_gain(rep, tp, args, tag):
+    """--gain as a phase of the normal run, for one transport."""
+    import shutil
+    rep.banner(f"4. pointer gain ({tag})")
+    if not shutil.which("libinput"):
+        rep.skip("pointer gain", "libinput binary not found")
+        return
+    nodes = [n for n, name in tp.event_nodes if name.endswith("Touchpad")]
+    if not nodes or tp.hidraw is None:
+        rep.skip("pointer gain", "no touchpad evdev node")
+        return
+    if not ask(f"GAIN: swipe ONE finger in big slow circles for "
+               f"{args.duration:.0f}s (measures cursor output per mm)"):
+        rep.skip("pointer gain", "user skipped")
+        return
+    res = run_gain_targets([{"tag": tag, "dev": tp, "node": nodes[0]}], args,
+                           args.out, prompt_user=False)
+    mm, ua, ac = res.get(tag, (0, 0, 0))
+    rep.check("pointer travels the expected distance per mm of finger motion",
+              mm > 5 and ua > 0,
+              f"{mm:.0f}mm of finger travel -> {ua:.3f} unaccelerated / "
+              f"{ac:.3f} accelerated units per mm"
+              if mm else "no finger travel captured", warn_only=True)
+    rep.data[f"gain_{tag}"] = {"travel_mm": mm, "unaccel_per_mm": ua,
+                               "accel_per_mm": ac,
+                               "profile": args.gain_profile}
 
 
 # ---------------------------------------------------------------- diagnosis
@@ -1787,6 +1847,10 @@ def run_transport(rep, args, bus, tag, record_fh):
     phase_features(rep, tp, args, tag)
     if not args.quick:
         phase_input(rep, tp, args, tag, record_fh)
+        if not args.no_gain:
+            phase_gain(rep, tp, args, tag)
+        if not args.no_hunt:
+            phase_jump_hunt(rep, tp, args, tag, record_fh)
     return tp
 
 
@@ -1908,6 +1972,16 @@ def lag_probe(args):
     return 0
 
 
+def write_json(rep, args):
+    if not args.json:
+        return
+    with open(args.json, "w") as f:
+        json.dump({"checks": [
+            {"phase": p, "name": n, "status": st, "detail": d}
+            for p, n, st, d in rep.checks], **rep.data}, f, indent=2)
+    print(f"\n  JSON written to {args.json}")
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1934,6 +2008,20 @@ def main():
     ap.add_argument("--record", metavar="FILE",
                     help="append raw hidraw captures as JSONL")
     ap.add_argument("--json", metavar="FILE", help="write result summary as JSON")
+    ap.add_argument("--out", metavar="DIR",
+                    help="write everything this run produced into DIR: "
+                         "transcript.log, result.json, frames.jsonl (and the "
+                         "libinput gain logs). Implies --record/--json. An "
+                         "existing finished run in DIR is not overwritten: "
+                         "DIR-2, DIR-3, ... is used instead")
+    ap.add_argument("--trace", action="store_true",
+                    help="echo every frame during the open-ended phases "
+                         "(default: only jumps and marks; every frame is in "
+                         "frames.jsonl either way)")
+    ap.add_argument("--no-gain", action="store_true",
+                    help="skip the pointer-gain phase of a normal run")
+    ap.add_argument("--no-hunt", action="store_true",
+                    help="skip the interactive jump-hunt phase")
     ap.add_argument("--gain", action="store_true",
                     help="measure libinput pointer output per mm of finger "
                     "travel on USB and BLE simultaneously")
@@ -1968,6 +2056,20 @@ def main():
                      "dongle, the host only sees its USB interfaces")
         args.aster = None  # aster talks to the keyboard, not the dongle
 
+    if args.out:
+        # A finished run leaves result.json behind; never clobber one. The
+        # sudo re-exec below re-enters here before anything is written, so
+        # parent and child agree on the same directory.
+        base, n = args.out, 1
+        while os.path.exists(os.path.join(args.out, "result.json")):
+            n += 1
+            args.out = f"{base}-{n}"
+        os.makedirs(args.out, exist_ok=True)
+        args.record = args.record or os.path.join(args.out, "frames.jsonl")
+        args.json = args.json or os.path.join(args.out, "result.json")
+        sys.stdout = Tee(sys.stdout, os.path.join(args.out, "transcript.log"))
+        print(f"run directory: {args.out}")
+
     if args.lag_probe:
         if os.geteuid() != 0 and not args.no_sudo and sys.stdin.isatty():
             os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
@@ -1986,7 +2088,19 @@ def main():
                 and not args.no_sudo and sys.stdin.isatty():
             os.execvp("sudo", ["sudo", sys.executable] + sys.argv)
         pin_cstates()
-        watch(devs[0])
+        rep = Report()
+        args.trace = True
+        record_fh = open(args.record, "a") if args.record else None
+        try:
+            phase_jump_hunt(rep, devs[0], args, "watch", record_fh,
+                            title="live trace")
+        finally:
+            if record_fh:
+                record_fh.close()
+        npass = sum(1 for c in rep.checks if c[2] == "pass")
+        print(f"\n  {npass} passed, {len(rep.failed())} failed, "
+              f"{sum(1 for c in rep.checks if c[2] == 'warn')} warnings")
+        write_json(rep, args)
         return 0
 
     rep = Report()
@@ -2023,12 +2137,10 @@ def main():
             record_fh.close()
 
     code = diagnose(rep)
-    if args.json:
-        with open(args.json, "w") as f:
-            json.dump({"checks": [
-                {"phase": p, "name": n, "status": s, "detail": d}
-                for p, n, s, d in rep.checks], **rep.data}, f, indent=2)
-        print(f"\n  JSON written to {args.json}")
+    write_json(rep, args)
+    if args.out:
+        print(f"  run directory: {args.out} (transcript.log, result.json, "
+              f"frames.jsonl)")
     return code
 
 
