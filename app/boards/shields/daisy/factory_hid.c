@@ -1225,6 +1225,250 @@ static uint8_t handle_touchpad_reg_write(const uint8_t *req, uint8_t req_len) {
 #endif
 }
 
+/* --- synthetic touchpad input (0x93-0x95) --------------------------------
+ *
+ * All three commands funnel into hid_touchpad_inject_input(), which hands the
+ * frame to the passthrough backends at the same point the driver's I2C read
+ * path does. So the frame takes the real route out: endpoint selection, BLE
+ * pacing/urgency, USB TX semaphore -- see factory.h's group 0x9 notes.
+ *
+ * Handlers run on process_q, which may block (the USB backend waits on its TX
+ * semaphore), so building a frame here is fine. The sweep is the exception: it
+ * has to keep a cadence for up to seconds, so it gets its own queue.
+ */
+#if HAS_TOUCHPAD
+
+/* Assemble a PTP (id 4) frame's fingers/count/buttons in place and stamp it
+ * with the current uptime, then inject it. `frame` must be
+ * DAISY_FACTORY_TP_PTP_REPORT_LEN bytes with the contact records and trailer
+ * already filled except for scan time. */
+static void tp_inject_ptp_frame(uint8_t *frame) {
+    /* Descriptor unit exponent -4: scan time counts 100 us ticks. It wraps
+     * every 6.55 s, which is what a real pad's 16-bit counter does too.
+     *
+     * Off the tick counter, not k_uptime_get(): that returns MILLISECONDS, so
+     * stamping from it quantized the field to 1 ms and made a 7.5 ms cadence
+     * read back as an alternating 7/8 -- indistinguishable, in the device
+     * timeline a host or a test analyses, from the pad actually pacing
+     * unevenly. Ticks are 32 us here (31250/s), comfortably finer than the
+     * 100 us unit. */
+    uint16_t scan = (uint16_t)((k_ticks_to_us_floor64(k_uptime_ticks()) / 100) & 0xFFFF);
+    sys_put_le16(scan, &frame[DAISY_FACTORY_TP_PTP_SCAN_OFF]);
+    hid_touchpad_inject_input(touchpad, DAISY_FACTORY_TP_REPORT_ID_PTP, frame,
+                              DAISY_FACTORY_TP_PTP_REPORT_LEN);
+}
+
+/* Staging buffer for INJECT_RAW. Only ever touched from process_q (one
+ * request outstanding at a time), so it needs no lock. `staged_id` remembers
+ * which report the partial buffer belongs to, so a SEND can't complete a
+ * sequence some other report started. */
+static uint8_t tp_stage_buf[DAISY_FACTORY_TP_INJECT_MAX_REPORT];
+static uint8_t tp_stage_id;
+static bool tp_stage_valid;
+
+/* Sweep generator. Its own queue and thread: it must hold a cadence for the
+ * whole run, and the inject call it makes can block on the USB backend's TX
+ * semaphore -- on process_q that would either be blocked by, or block, an
+ * unrelated command, and on the system workqueue it would contend with the
+ * ZMK HID submit paths that already stall it for up to 100 ms. */
+static K_THREAD_STACK_DEFINE(tp_sweep_q_stack, 1024);
+static struct k_work_q tp_sweep_q;
+#define TP_SWEEP_Q_PRIORITY K_PRIO_PREEMPT(4)
+
+static void tp_sweep_work_handler(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(tp_sweep_work, tp_sweep_work_handler);
+
+/* Written by the handler (process_q) before the work is scheduled and read
+ * only by the sweep thread afterwards; a restart cancels the work first, so
+ * the two never touch this concurrently. */
+static struct {
+    uint16_t x0, y0, x1, y1;
+    uint16_t frames;
+    uint8_t flags;
+    uint16_t next;       /* index of the frame to emit, 0..frames (frames = lift-off) */
+    k_ticks_t anchor;    /* uptime ticks of frame 0 */
+    k_ticks_t step;      /* ticks between frames */
+} tp_sweep;
+
+/* Linear interpolation across `frames` positions, endpoints included. The
+ * division is over frames-1 so the last motion frame lands exactly on
+ * (x1,y1); a single-frame sweep is just (x0,y0). Rounded, so a short sweep
+ * doesn't bias every step towards the start. */
+static uint16_t tp_sweep_lerp(uint16_t a, uint16_t b, uint16_t i, uint16_t frames) {
+    if (frames <= 1) {
+        return a;
+    }
+    int32_t span = (int32_t)b - (int32_t)a;
+    int32_t steps = (int32_t)frames - 1;
+    int32_t num = span * (int32_t)i;
+    /* Round half away from zero without floating point. */
+    int32_t delta = (num >= 0) ? (num + steps / 2) / steps : (num - steps / 2) / steps;
+    return (uint16_t)((int32_t)a + delta);
+}
+
+static void tp_sweep_work_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+
+    uint8_t frame[DAISY_FACTORY_TP_PTP_REPORT_LEN] = {0};
+    uint16_t i = tp_sweep.next;
+
+    if (i < tp_sweep.frames) {
+        /* One contact in slot 0: confident, tip down, contact id 0. */
+        frame[0] = DAISY_FACTORY_TP_PTP_CONFIDENCE | DAISY_FACTORY_TP_PTP_TIP;
+        sys_put_le16(tp_sweep_lerp(tp_sweep.x0, tp_sweep.x1, i, tp_sweep.frames), &frame[1]);
+        sys_put_le16(tp_sweep_lerp(tp_sweep.y0, tp_sweep.y1, i, tp_sweep.frames), &frame[3]);
+        frame[DAISY_FACTORY_TP_PTP_COUNT_OFF] = 1;
+        frame[DAISY_FACTORY_TP_PTP_BTN_OFF] =
+            (tp_sweep.flags & DAISY_FACTORY_TP_SWEEP_BUTTON) ? 1 : 0;
+    } else {
+        /* Lift-off: confidence/tip clear, buttons released and the contact
+         * count down to 0, which is what a real pad sends on release. The
+         * zeroed frame is all of that already; spell the count out anyway,
+         * since it is the byte a host actually keys the release off. */
+        frame[DAISY_FACTORY_TP_PTP_COUNT_OFF] = 0;
+    }
+    tp_inject_ptp_frame(frame);
+
+    tp_sweep.next = i + 1;
+    bool more = (tp_sweep.flags & DAISY_FACTORY_TP_SWEEP_NO_LIFT)
+                    ? (tp_sweep.next < tp_sweep.frames)
+                    : (tp_sweep.next <= tp_sweep.frames);
+    if (more) {
+        /* Absolute deadline off the one anchor: per-frame scheduling latency
+         * (the inject can block on the USB TX semaphore) then costs a late
+         * frame, not a permanently shifted grid. A frame whose deadline has
+         * already passed goes out immediately, so the run still ends on time
+         * with a compressed gap rather than stretching. */
+        k_work_reschedule_for_queue(
+            &tp_sweep_q, &tp_sweep_work,
+            K_TIMEOUT_ABS_TICKS(tp_sweep.anchor + (k_ticks_t)tp_sweep.next * tp_sweep.step));
+    }
+}
+
+#endif /* HAS_TOUCHPAD */
+
+/* Stage raw report bytes, and dispatch the buffer if SEND is set.
+ * req = [report_id, offset, flags, bytes...]. */
+static uint8_t handle_touchpad_inject_raw(const uint8_t *req, uint8_t req_len) {
+#if !HAS_TOUCHPAD
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 3) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    uint8_t report_id = req[0];
+    uint8_t offset = req[1];
+    uint8_t flags = req[2];
+    uint8_t n = req_len - 3;
+
+    if ((size_t)offset + n > sizeof(tp_stage_buf)) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+    /* A sequence must stay on one report id: continuing (or completing) a
+     * partial buffer with a different id would silently send a mixture. */
+    if (tp_stage_valid && offset != 0 && report_id != tp_stage_id) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+    memcpy(&tp_stage_buf[offset], &req[3], n);
+    tp_stage_id = report_id;
+    tp_stage_valid = true;
+
+    if (flags & DAISY_FACTORY_TP_INJECT_SEND) {
+        hid_touchpad_inject_input(touchpad, report_id, tp_stage_buf, offset + n);
+        /* Buffer contents survive on purpose (factory.h): the next send can
+         * rewrite only the bytes that moved. Only the id binding is released. */
+        tp_stage_valid = false;
+    }
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* Build one PTP frame from a compact finger list and inject it.
+ * req = [contact_count, buttons, n_fingers, n x (status, x u16, y u16)]. */
+static uint8_t handle_touchpad_inject_ptp(const uint8_t *req, uint8_t req_len) {
+#if !HAS_TOUCHPAD
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 3) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    uint8_t n_fingers = req[2];
+    if (n_fingers > DAISY_FACTORY_TP_INJECT_PTP_MAX_FINGERS) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+    if (req_len < 3 + n_fingers * DAISY_FACTORY_TP_PTP_STRIDE) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+
+    uint8_t frame[DAISY_FACTORY_TP_PTP_REPORT_LEN] = {0};
+    /* Contact records are laid out identically on the wire and in the report,
+     * so the finger list copies straight across; unlisted slots stay zero,
+     * which is how a real pad reports a lifted contact. */
+    memcpy(frame, &req[3], n_fingers * DAISY_FACTORY_TP_PTP_STRIDE);
+    frame[DAISY_FACTORY_TP_PTP_COUNT_OFF] = req[0];
+    frame[DAISY_FACTORY_TP_PTP_BTN_OFF] = req[1];
+    tp_inject_ptp_frame(frame);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+
+/* Start (or replace) a sweep. req = [x0 u16, y0 u16, x1 u16, y1 u16,
+ * frames u16, interval_us u32, flags u8]; payload out = [duration_ms u32].
+ * Returns before the first frame goes out. */
+static uint8_t handle_touchpad_inject_sweep(const uint8_t *req, uint8_t req_len, uint8_t *payload,
+                                            uint8_t *out_len) {
+#if !HAS_TOUCHPAD
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 15) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    uint16_t frames = sys_get_le16(&req[8]);
+    uint32_t interval_us = sys_get_le32(&req[10]);
+
+    /* A run already in flight is cancelled either way: frames == 0 is the
+     * documented cancel, and a new sweep replaces the old one. Cancel first
+     * so the work handler can't fire between here and the state update. */
+    struct k_work_sync sync;
+    k_work_cancel_delayable_sync(&tp_sweep_work, &sync);
+    if (frames == 0) {
+        *out_len = 4;
+        sys_put_le32(0, payload);
+        return DAISY_FACTORY_OK;
+    }
+
+    if (frames > DAISY_FACTORY_TP_INJECT_SWEEP_MAX_FRAMES ||
+        interval_us < DAISY_FACTORY_TP_INJECT_SWEEP_MIN_US ||
+        interval_us > DAISY_FACTORY_TP_INJECT_SWEEP_MAX_US) {
+        return DAISY_FACTORY_ERR_BAD_ARG;
+    }
+
+    tp_sweep.x0 = sys_get_le16(&req[0]);
+    tp_sweep.y0 = sys_get_le16(&req[2]);
+    tp_sweep.x1 = sys_get_le16(&req[4]);
+    tp_sweep.y1 = sys_get_le16(&req[6]);
+    tp_sweep.frames = frames;
+    tp_sweep.flags = req[14];
+    tp_sweep.next = 0;
+    tp_sweep.step = k_us_to_ticks_ceil64(interval_us);
+    tp_sweep.anchor = k_uptime_ticks();
+
+    uint16_t total = frames + ((tp_sweep.flags & DAISY_FACTORY_TP_SWEEP_NO_LIFT) ? 0 : 1);
+    /* Duration to the last frame's deadline: (total - 1) gaps, measured on the
+     * grid actually used. The step was rounded UP to whole ticks (32 us here),
+     * so reporting the requested interval instead would under-state the run --
+     * 7500 us becomes 7520, i.e. 8 ms short over 400 frames, and a host that
+     * waits out the returned value would stop capturing mid-sweep. */
+    uint64_t step_us = k_ticks_to_us_ceil64(tp_sweep.step);
+    sys_put_le32((uint32_t)(((uint64_t)(total - 1) * step_us + 999) / 1000), payload);
+    *out_len = 4;
+
+    k_work_reschedule_for_queue(&tp_sweep_q, &tp_sweep_work, K_NO_WAIT);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
 /* Read a named GPIO's logical level. req = [gpio_id]; payload out = [level].
  * The level is gpio_pin_get_dt (active-low aware): 1 = asserted. */
 static uint8_t handle_gpio_get(const uint8_t *req, uint8_t req_len, uint8_t *payload,
@@ -1732,6 +1976,19 @@ static void process_work_handler(struct k_work *work) {
         status = handle_touchpad_reg_write(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
                                            req_buf[DAISY_FACTORY_OFF_LEN]);
         break;
+    case DAISY_FACTORY_CMD_TOUCHPAD_INJECT_RAW:
+        status = handle_touchpad_inject_raw(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                            req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_TOUCHPAD_INJECT_PTP:
+        status = handle_touchpad_inject_ptp(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                            req_buf[DAISY_FACTORY_OFF_LEN]);
+        break;
+    case DAISY_FACTORY_CMD_TOUCHPAD_INJECT_SWEEP:
+        status = handle_touchpad_inject_sweep(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                              req_buf[DAISY_FACTORY_OFF_LEN], payload,
+                                              &payload_len);
+        break;
     case DAISY_FACTORY_CMD_GPIO_GET:
         status = handle_gpio_get(&req_buf[DAISY_FACTORY_OFF_PAYLOAD], req_buf[DAISY_FACTORY_OFF_LEN],
                                  payload, &payload_len);
@@ -1805,6 +2062,14 @@ static int daisy_factory_hid_init(void) {
     k_work_queue_start(&ship_q, ship_q_stack, K_THREAD_STACK_SIZEOF(ship_q_stack), K_PRIO_COOP(7),
                        NULL);
     k_thread_name_set(&ship_q.thread, "daisy_ship");
+#endif
+
+#if HAS_TOUCHPAD
+    /* Synthetic-touchpad sweep generator; see tp_sweep_q for why it needs a
+     * thread of its own. Idle until a TOUCHPAD_INJECT_SWEEP arrives. */
+    k_work_queue_start(&tp_sweep_q, tp_sweep_q_stack, K_THREAD_STACK_SIZEOF(tp_sweep_q_stack),
+                       TP_SWEEP_Q_PRIORITY, NULL);
+    k_thread_name_set(k_work_queue_thread_get(&tp_sweep_q), "daisy_tp_sweep");
 #endif
 
     int err = hid_device_register(hid_dev, factory_report_desc, sizeof(factory_report_desc), &ops);

@@ -225,6 +225,112 @@ enum daisy_factory_cmd {
      * Debug/bring-up aid; same HID-I2C-mode caveat as TOUCHPAD_REG_READ. */
     DAISY_FACTORY_CMD_TOUCHPAD_REG_WRITE = 0x92,
 
+    /* --- synthetic touchpad input (group 0x9, cont.) ---------------------
+     *
+     * The three INJECT commands hand a fabricated input report to the
+     * passthrough backends exactly where the I2C read path hands them a real
+     * one: same callbacks, same zmk_endpoint_get_selected() routing, same BLE
+     * pacing and urgency logic. So a host can exercise the whole outbound
+     * chain -- USB HID interface, BLE HOGP to a phone/PC, or BLE to the
+     * Framework dongle and out its USB -- with no finger on the pad, and with
+     * frame contents and timing it controls exactly.
+     *
+     * Nothing is written to the pad over I2C: injection works even with the
+     * pad asleep (TOUCHPAD_POWER_SET 0x90) or absent, and a real finger
+     * moving at the same time simply interleaves its frames with the
+     * synthetic ones.
+     *
+     * Pick the endpoint FIRST (ENDPOINT_SET 0x71, and BT_PROF_SELECT 0x62 for
+     * BLE): a frame injected while another transport is selected is dropped
+     * by the backends, exactly as a real one would be.
+     *
+     * All three are UNSUPPORTED on a target built without a touchpad. */
+
+    /* Stage raw report bytes and optionally send them. payload:
+     * [report_id u8][offset u8][flags u8][bytes...].
+     *
+     * `bytes` are copied into a staging buffer at `offset`; with
+     * DAISY_FACTORY_TP_INJECT_SEND set in `flags` the buffer's first
+     * (offset + len(bytes)) bytes are then dispatched as one input report of
+     * `report_id`. The staging buffer exists because a full PTP frame (id 4,
+     * 29 bytes) does not fit in one DAISY_FACTORY_PAYLOAD_SIZE frame: send
+     * offset 0 with 24 bytes, then offset 24 with the last 5 and SEND.
+     * A mouse-mode report (id 1, 8 bytes) fits in a single SEND frame.
+     *
+     * A frame at a non-zero offset must carry the same `report_id` as the
+     * sequence it continues, or it is BAD_ARG: that stops a half-staged
+     * buffer being completed by an unrelated report. A SEND releases the
+     * binding, so the next sequence is free to use a different id.
+     * offset + len must be <= DAISY_FACTORY_TP_INJECT_MAX_REPORT (BAD_ARG).
+     * Report IDs the descriptor doesn't declare are accepted here and
+     * dropped downstream; this command deliberately doesn't second-guess the
+     * descriptor.
+     *
+     * The buffer is NOT cleared between reports, which is a feature: stage
+     * the constant part of a frame once, then send a series that only
+     * rewrites the moving bytes. */
+    DAISY_FACTORY_CMD_TOUCHPAD_INJECT_RAW = 0x93,
+
+    /* Build and send one PTP (id 4) frame from a compact description.
+     * payload: [contact_count u8][buttons u8][n_fingers u8]
+     *          then n_fingers x [status u8][x u16 LE][y u16 LE].
+     *
+     * One frame on the wire per report, where INJECT_RAW needs two, so this
+     * is the one to stream from the host. `status` is the descriptor's own
+     * finger status byte: bit0 confidence, bit1 tip switch, bits 4-7 contact
+     * id. Fingers are placed in report order starting at contact slot 0;
+     * unlisted slots are zero (confidence 0, tip 0, position 0), which is how
+     * a real pad reports a lifted contact.
+     *
+     * `contact_count` is sent as given rather than derived from n_fingers, so
+     * a deliberately inconsistent frame can be injected to see what the host
+     * does with it. Scan time is filled in by the firmware from its own
+     * uptime in 100 us units, matching the descriptor's unit exponent -4 --
+     * a host-supplied one would be a lie the moment the frame is paced.
+     *
+     * n_fingers > DAISY_FACTORY_TP_INJECT_PTP_MAX_FINGERS is BAD_ARG; that
+     * limit is what fits in one frame, and the descriptor's fifth contact
+     * slot is only reachable through INJECT_RAW. */
+    DAISY_FACTORY_CMD_TOUCHPAD_INJECT_PTP = 0x94,
+
+    /* Generate a straight-line one-finger drag on the keyboard and send it as
+     * a series of PTP frames. payload:
+     * [x0 u16 LE][y0 u16 LE][x1 u16 LE][y1 u16 LE]
+     * [frames u16 LE][interval_us u32 LE][flags u8]
+     * -> [duration_ms u32 LE]
+     *
+     * `frames` positions are linearly interpolated from (x0,y0) to (x1,y1)
+     * inclusive, emitted on an ABSOLUTE tick grid `interval_us` apart, then
+     * (unless NO_LIFT) one final frame with contact count 0 and the tip
+     * released. The grid is anchored once at the start, so the cadence does
+     * not accumulate per-frame scheduling drift.
+     *
+     * That fixed cadence is the point: driving the same frames from the host
+     * puts a USB round-trip and the host scheduler between them, which is
+     * indistinguishable in an arrival histogram from the firmware pacing
+     * defects these tests exist to measure. interval_us is microseconds, not
+     * milliseconds, because the intervals that matter (a 7.5 ms connection
+     * interval, a 7.10 ms pad frame period) are not whole milliseconds.
+     *
+     * `interval_us` is rounded UP to a whole kernel tick (32 us on this SoC,
+     * CONFIG_SYS_CLOCK_TICKS_PER_SEC=31250), so 7500 becomes 7520. The
+     * returned `duration_ms` is measured on that real grid, not on the
+     * requested interval, so waiting it out always outlasts the run.
+     *
+     * Returns immediately, before the first frame goes out; `duration_ms` is
+     * how long the run will take, for the host to wait out. A sweep started
+     * while one is running REPLACES it (no error) -- the new anchor is now.
+     * `frames` == 0 cancels a running sweep and sends nothing, not even a
+     * lift-off frame, which leaves the host holding a pressed contact on
+     * purpose: that is how you test what it does with a stuck finger.
+     *
+     * frames > DAISY_FACTORY_TP_INJECT_SWEEP_MAX_FRAMES, or interval_us
+     * outside [DAISY_FACTORY_TP_INJECT_SWEEP_MIN_US,
+     * DAISY_FACTORY_TP_INJECT_SWEEP_MAX_US], is BAD_ARG. Coordinates are not
+     * range-checked against the descriptor's logical maximum: injecting an
+     * out-of-range position is a legitimate test. */
+    DAISY_FACTORY_CMD_TOUCHPAD_INJECT_SWEEP = 0x95,
+
     /* group 0xA: PERT (packet-error-rate test via Bluetooth Direct Test Mode)
      *
      * Raw-PHY per-channel PER measurement between the keyboard and a test
@@ -442,6 +548,60 @@ enum daisy_factory_touchpad_power {
     DAISY_FACTORY_TOUCHPAD_ON = 1,    /* run: full operation */
     DAISY_FACTORY_TOUCHPAD_SLEEP = 2, /* modern standby: touch-detect only */
 };
+
+/* --- synthetic touchpad input (TOUCHPAD_INJECT_*) ------------------------ */
+
+/* Report IDs the pad's descriptor declares for input. Injecting anything else
+ * is accepted by INJECT_RAW and dropped by the passthrough backends. */
+#define DAISY_FACTORY_TP_REPORT_ID_MOUSE 1 /* 8 data bytes, RELATIVE motion */
+#define DAISY_FACTORY_TP_REPORT_ID_PTP 4   /* 29 data bytes, ABSOLUTE position */
+
+/* Largest report INJECT_RAW will stage, i.e. the size of its staging buffer.
+ * Comfortably above the 29-byte PTP frame, which is the biggest input report
+ * the descriptor declares. */
+#define DAISY_FACTORY_TP_INJECT_MAX_REPORT 64
+
+/* Flags byte of DAISY_FACTORY_CMD_TOUCHPAD_INJECT_RAW. */
+/* Dispatch the staged buffer as an input report once this frame's bytes are
+ * copied in. Without it the frame only stages bytes. */
+#define DAISY_FACTORY_TP_INJECT_SEND (1u << 0)
+
+/* PTP frame layout, mirroring the report descriptor (see the `touchpad` node's
+ * report-descriptor in daisy-touchpad.dtsi): 5 contact records of
+ * [status u8][x u16 LE][y u16 LE], then contact count, buttons, scan time
+ * u16 LE. Used by INJECT_PTP and the sweep generator, and the numbers a host
+ * needs to hand-assemble a frame for INJECT_RAW. */
+#define DAISY_FACTORY_TP_PTP_REPORT_LEN 29
+#define DAISY_FACTORY_TP_PTP_MAX_CONTACTS 5
+#define DAISY_FACTORY_TP_PTP_STRIDE 5     /* bytes per contact record */
+#define DAISY_FACTORY_TP_PTP_COUNT_OFF 25 /* contact count */
+#define DAISY_FACTORY_TP_PTP_BTN_OFF 26   /* buttons, bits 0-2 */
+#define DAISY_FACTORY_TP_PTP_SCAN_OFF 27  /* scan time u16 LE, 100 us units */
+
+/* Bits of a contact record's status byte. */
+#define DAISY_FACTORY_TP_PTP_CONFIDENCE (1u << 0)
+#define DAISY_FACTORY_TP_PTP_TIP (1u << 1)
+#define DAISY_FACTORY_TP_PTP_CONTACT_ID_SHIFT 4
+
+/* Fingers INJECT_PTP can describe in one frame: what fits in
+ * DAISY_FACTORY_PAYLOAD_SIZE after its 3-byte header, at 5 bytes each. The
+ * descriptor's fifth contact slot is reachable only through INJECT_RAW. */
+#define DAISY_FACTORY_TP_INJECT_PTP_MAX_FINGERS 4
+
+/* Bounds on DAISY_FACTORY_CMD_TOUCHPAD_INJECT_SWEEP. The frame cap keeps a
+ * typo from starting a run that outlives the test; the interval floor keeps
+ * the generator from starving its own work queue. */
+#define DAISY_FACTORY_TP_INJECT_SWEEP_MAX_FRAMES 4096
+#define DAISY_FACTORY_TP_INJECT_SWEEP_MIN_US 500
+#define DAISY_FACTORY_TP_INJECT_SWEEP_MAX_US 1000000
+
+/* Flags byte of DAISY_FACTORY_CMD_TOUCHPAD_INJECT_SWEEP. */
+/* Leave the contact pressed at the end: no final count-0 frame. The host is
+ * left holding a finger that never lifts, on purpose. */
+#define DAISY_FACTORY_TP_SWEEP_NO_LIFT (1u << 0)
+/* Hold button 1 down for every frame of the sweep (a drag rather than a
+ * move). The lift-off frame releases it. */
+#define DAISY_FACTORY_TP_SWEEP_BUTTON (1u << 1)
 
 /* HID transport selector for the ENDPOINT_* commands. Values match ZMK's
  * enum zmk_transport (settings-stable there, so stable here too). */
