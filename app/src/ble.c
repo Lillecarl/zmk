@@ -112,7 +112,13 @@ static bt_addr_le_t peripheral_addrs[ZMK_SPLIT_BLE_PERIPHERAL_COUNT];
 
 #endif /* IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL) */
 
+static void apply_link_params(void);
+
 static void raise_profile_changed_event(void) {
+    /* The active profile decides which link runs at HID speed and which idle
+     * at the long interval (see apply_link_params); every path that changes
+     * it ends up here. */
+    apply_link_params();
     raise_zmk_ble_active_profile_changed((struct zmk_ble_active_profile_changed){
         .index = active_profile, .profile = &profiles[active_profile]});
 }
@@ -655,6 +661,87 @@ static bool is_conn_active_profile(const struct bt_conn *conn) {
     return bt_addr_le_cmp(bt_conn_get_dst(conn), &profiles[active_profile].peer) == 0;
 }
 
+/* Connection parameters by profile role.
+ *
+ * Every bonded profile stays connected (BT_MAX_CONN > 1) but only the active
+ * one carries HID traffic. An inactive link that keeps the same 7.5 ms
+ * interval / latency 30 as the active one still wakes the radio every
+ * (latency + 1) intervals ~= 232 ms, and the Zephyr link layer gives the
+ * active link no precedence when the two events overlap: the ticker's age
+ * comparison discounts planned latency skips, and a running peripheral event
+ * is aborted by any other event's prepare unless it is near supervision
+ * timeout (lll_conn_peripheral_is_abort_cb). Each such collision costs the
+ * active link one connection event; on the dongle path that surfaces as a
+ * touchpad frame arriving 7.5 ms late paired with the next one, which
+ * libinput turns into a cursor jump (aster plans/touchpad-passthrough-fixes.md,
+ * Phase G, cause 2 -- measured 2026-09-06: disconnecting the idle laptop link
+ * took the dongle from ~9 % paired frames to the direct-BLE baseline).
+ *
+ * So inactive links are renegotiated to a long interval with latency: one
+ * radio wake every 100 ms x (19 + 1) = 2 s instead of every 232 ms, i.e.
+ * roughly a tenth of the collisions, and a latency link breaks latency on its
+ * own as soon as it has data, so switching back to that profile costs one
+ * 100 ms interval for the request plus ~6 intervals to the update instant.
+ * Supervision timeout must exceed 2 x (1 + latency) x interval = 4 s, and
+ * Linux additionally requires latency <= timeout x 4 / interval - 1 = 29
+ * (hci_check_conn_params). The active link keeps the BT_PERIPHERAL_PREF_*
+ * values (see daisy.conf for why those are 7.5-10 ms). */
+static const struct bt_le_conn_param conn_param_active = BT_LE_CONN_PARAM_INIT(
+    CONFIG_BT_PERIPHERAL_PREF_MIN_INT, CONFIG_BT_PERIPHERAL_PREF_MAX_INT,
+    CONFIG_BT_PERIPHERAL_PREF_LATENCY, CONFIG_BT_PERIPHERAL_PREF_TIMEOUT);
+static const struct bt_le_conn_param conn_param_inactive =
+    BT_LE_CONN_PARAM_INIT(80, 80, 19, 600); /* 100 ms, latency 19, 6 s */
+
+static void apply_link_params_cb(struct bt_conn *conn, void *data) {
+    struct bt_conn_info info;
+    char addr[BT_ADDR_LE_STR_LEN];
+
+    if (bt_conn_get_info(conn, &info) != 0 || info.type != BT_CONN_TYPE_LE ||
+        info.role != BT_CONN_ROLE_PERIPHERAL || info.state != BT_CONN_STATE_CONNECTED) {
+        return;
+    }
+
+    /* A peer that matches no profile is a pairing in progress: the open
+     * profile's address is only recorded once bonding completes
+     * (set_profile_address -> profile-changed event -> back here). Leave the
+     * host's default preferences in charge until then, or a passkey-entry
+     * pairing that outlasts the 5 s timer would idle its own link. */
+    if (zmk_ble_profile_index(bt_conn_get_dst(conn)) < 0) {
+        return;
+    }
+
+    bool active = is_conn_active_profile(conn);
+    const struct bt_le_conn_param *param = active ? &conn_param_active : &conn_param_inactive;
+
+    /* Already there (e.g. re-applied on another profile's connect): don't
+     * start a procedure for nothing. */
+    if (info.le.interval >= param->interval_min && info.le.interval <= param->interval_max &&
+        info.le.latency == param->latency && info.le.timeout == param->timeout) {
+        return;
+    }
+
+    bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+    /* Before the host's 5 s post-connect update timer has fired this only
+     * stores the request and the timer sends it in place of the Kconfig
+     * preferences; afterwards it goes out right away. */
+    int err = bt_conn_le_param_update(conn, param);
+    if (err) {
+        LOG_WRN("%s: %s-profile param update (%u-%u/%u/%u) failed: %d", addr,
+                active ? "active" : "inactive", param->interval_min, param->interval_max,
+                param->latency, param->timeout, err);
+    } else {
+        LOG_DBG("%s: requesting %s-profile params %u-%u/%u/%u", addr,
+                active ? "active" : "inactive", param->interval_min, param->interval_max,
+                param->latency, param->timeout);
+    }
+}
+
+/* Re-evaluate every peripheral link's parameters against the active profile.
+ * Called on connect and whenever the active profile changes. */
+static void apply_link_params(void) {
+    bt_conn_foreach(BT_CONN_TYPE_LE, apply_link_params_cb, NULL);
+}
+
 static void connected(struct bt_conn *conn, uint8_t err) {
     char addr[BT_ADDR_LE_STR_LEN];
     struct bt_conn_info info;
@@ -679,6 +766,7 @@ static void connected(struct bt_conn *conn, uint8_t err) {
     LOG_DBG("Connected %s", addr);
 
     update_advertising();
+    apply_link_params();
 
     if (is_conn_active_profile(conn)) {
         LOG_DBG("Active profile connected");
