@@ -63,6 +63,79 @@ config DAISY_CHARGE_TIMEOUT_RECOVERY
       latch behavior for lab A/B testing. See
       aster/issues/charge-stops-early-safety-timer.md.
 
+config DAISY_BATTERY_CUTOFF
+    bool "Low-battery cutoff (nPM1300 ship mode)"
+    default y
+    depends on ZMK_USB
+    help
+      Stop discharging the pack before it reaches its own protection trip.
+      The cell spec (PACK-GPT-RD.SPC-010123-FT612178PA-1200-FA322 §3.5) gives
+      a 3.0 V discharge cut-off and the pack's CM1006-DAA protection IC trips
+      at 2.92/3.00/3.08 V; with both bucks configured for 3.3 V the rails just
+      follow the cell down past that, which is the over-discharge the pack
+      vendor reported.
+
+      The nPM1300 cannot do this in hardware here: it has no battery UVLO
+      (PS §6.2.2) and its POF comparator only signals on a PMIC GPIO, and
+      GPIO0..GPIO4 are unconnected on dvt1/dvt2. So battery_cutoff.c polls
+      VBAT and, once it holds at/below the threshold, enters ship mode
+      (370 nA, battery disconnected from the system). Recovery is a USB
+      plug-in.
+
+      Set to n only for lab work that deliberately runs a pack down.
+
+if DAISY_BATTERY_CUTOFF
+
+config DAISY_BATTERY_CUTOFF_MV
+    int "Low-battery cutoff threshold, mV"
+    default 3200
+    range 3100 3600
+    help
+      VBAT at or below this, held for DAISY_BATTERY_CUTOFF_CONSECUTIVE polls
+      with USB unplugged, enters ship mode. 3200 mV is the pack vendor's
+      requested floor and leaves ~120 mV of margin over the protection IC's
+      3.08 V worst-case trip. A build assert keeps it above 3080 mV.
+
+config DAISY_BATTERY_WARN_MV
+    int "Low-battery warning threshold, mV"
+    default 3350
+    help
+      VBAT at or below this blinks the status LED red. Must be above
+      DAISY_BATTERY_CUTOFF_MV.
+
+config DAISY_BATTERY_BACKLIGHT_SHED_MV
+    int "Backlight shed threshold, mV"
+    default 3400
+    help
+      VBAT at or below this turns the backlight off. It is the largest single
+      load, so shedding it buys real runtime and slows the approach to the
+      cutoff. Must not be below DAISY_BATTERY_WARN_MV.
+
+config DAISY_BATTERY_CUTOFF_HYSTERESIS_MV
+    int "Recovery hysteresis, mV"
+    default 100
+    help
+      How far above a threshold VBAT must climb before that step is undone.
+      Applies to the warning and the backlight shed; the cutoff itself is
+      terminal.
+
+config DAISY_BATTERY_CUTOFF_CONSECUTIVE
+    int "Consecutive samples below the cutoff before acting"
+    default 5
+    range 2 60
+    help
+      VBAT sags hard on BLE TX bursts and with the backlight on, so a single
+      reading below the threshold can happen with charge to spare. Requiring
+      several consecutive polls turns the check into a sustained-undervoltage
+      test. At the default poll interval this is ~5 minutes.
+
+config DAISY_BATTERY_CUTOFF_POLL_SEC
+    int "VBAT poll interval, seconds"
+    default 60
+    range 5 600
+
+endif # DAISY_BATTERY_CUTOFF
+
 config ZMK_KEYBOARD_NAME
     # TODO: Full name (Current limit is 16 - BT_DEVICE_NAME_MAX)
     #        1234567890123456

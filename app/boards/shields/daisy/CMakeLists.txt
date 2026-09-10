@@ -27,6 +27,9 @@ zephyr_library_sources(charging_led.c)
 # low-battery cutoff. Always built: it compiles to stubs on targets with no
 # PMIC, and two callers must not run separate state machines against it.
 zephyr_library_sources(pmic_ship.c)
+if(CONFIG_DAISY_BATTERY_CUTOFF)
+  zephyr_library_sources(battery_cutoff.c)
+endif()
 if(CONFIG_DAISY_CHARGE_TIMEOUT_RECOVERY)
   zephyr_library_sources(charge_timeout_recovery.c)
 endif()
