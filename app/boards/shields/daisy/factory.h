@@ -413,6 +413,7 @@ enum daisy_factory_cmd {
      * first, so RF_START can be called back to back without RF_STOP.
      * payload: [mode u8][rate u8][pattern u8][tx_power i8][chan_start u8]
      *          [chan_end u8][dwell_ms u16 LE][duty u8][packets u32 LE]
+     *          [payload_len u8, optional]
      *   mode:       daisy_factory_rf_mode; BAD_ARG otherwise.
      *   rate:       daisy_factory_rf_rate; BAD_ARG otherwise.
      *   pattern:    daisy_factory_rf_pattern; BAD_ARG otherwise.
@@ -430,6 +431,38 @@ enum daisy_factory_cmd {
      *               RF_STOP. When nonzero the test ends by itself and
      *               RF_STATUS's `running` clears -- that is how a host waits
      *               for a counted run to finish.
+     *   payload_len: OPTIONAL 14th byte. Test-data bytes per transmitted
+     *               packet, 1..255, for the MODULATED_TX modes; ignored by
+     *               the others. Omitted, or 0, selects 255 -- what every
+     *               firmware before this field sent, so a 13-byte RF_START
+     *               means exactly what it always did.
+     *
+     *               0 rather than "absent" is the unset value because the
+     *               dongle's config protocol carries a fixed-size buffer with
+     *               no length, so it cannot tell a byte that was left out from
+     *               one that was left zero. The two devices answer the same
+     *               host code, so they agree on the sentinel.
+     *
+     *               It sets the time on air, and so the runtime of a counted
+     *               run: a BLE 1M packet is (8 + payload_len) bytes on air,
+     *               2104 us at 255 and 168 us at 13. Certification wants the
+     *               long packet; a link test wants a short one, and Lite-On's
+     *               PERT guide measures its <=1% PER against a 13-byte packet,
+     *               so PER is only comparable between runs of equal length.
+     *
+     *               Both ends of a link need the SAME value. It is not only
+     *               the transmitted length: PCNF1.MAXLEN is set from it, and
+     *               that sizes the window the radio spends on each reception
+     *               whatever the on-air header says. A receiver left at 255
+     *               counts about (8 + payload_len) / 263 of a short
+     *               transmitter's packets -- measured 8.1% at 13 bytes -- and
+     *               one set shorter than the transmitter drops everything.
+     *
+     *               Whether the firmware honours it is visible in RF_STATUS:
+     *               a response carrying `payload_len` (24 bytes, not 23) has
+     *               it. There is no capability bit, because a host driving a
+     *               link test has to ask the same question of the dongle,
+     *               whose config protocol has no capability word.
      * HW if RF_ENTER hasn't run. */
     DAISY_FACTORY_CMD_RF_START = 0xB1,
     /* Stop the running test and return the RX packet count.
@@ -499,10 +532,15 @@ enum daisy_factory_rf_pattern {
  *   flag. Nonzero only for the modulated TX modes; 0 for an unmodulated
  *   carrier (which sends no packets), for RX and for the sweeps.
  *
+ * - `payload_len` echoes the transmitted test-data length of the last accepted
+ *   RF_START (see the command). Its presence is also how a host detects that
+ *   this firmware has the field at all: 24 bytes back, not 23.
+ *
  * The first 19 bytes through `rx_packets` are byte-identical to the dongle's
- * `rf_status_t` (hid-remapper-private, firmware/src/types.h), and `tx_packets`
- * sits at the same offset 19 there, so one host decoder serves both. Append any
- * future field at the end, on both sides. */
+ * `rf_status_t` (hid-remapper-private, firmware/src/types.h), `tx_packets` sits
+ * at the same offset 19 there and `payload_len` at 23, so one host decoder
+ * serves both. Append any future field at the end, on both sides -- and never
+ * inside the embedded config, which would move everything after it. */
 struct daisy_factory_rf_status {
     uint8_t entered;
     uint8_t running;
@@ -517,6 +555,7 @@ struct daisy_factory_rf_status {
     uint32_t packets;    /* LE, 0 = continuous */
     uint32_t rx_packets; /* LE */
     uint32_t tx_packets; /* LE */
+    uint8_t payload_len; /* test-data bytes per transmitted packet */
 } __attribute__((packed));
 
 /* PHY selector for the PERT_*_START commands. Values match the HCI LE

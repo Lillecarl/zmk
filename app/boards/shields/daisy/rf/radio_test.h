@@ -133,6 +133,24 @@ struct radio_test_config {
 			 */
 			uint32_t packets_num;
 
+			/**
+			 * Local delta: test-data bytes per packet, 0-255.
+			 *
+			 * Upstream always sent RADIO_MAX_PAYLOAD_LEN - 1 (255),
+			 * which fixes a BLE 1M packet at 263 bytes on air --
+			 * 2104 us, and so ~2 s for a 1000-packet run. The link
+			 * test walks channels and directions, so that length
+			 * sets its whole runtime; it is also ~12x the packet
+			 * Lite-On's PERT guide measures its <=1% PER against.
+			 * Making it a knob lets one measurement match that
+			 * reference and the certification runs keep the long
+			 * packet.
+			 *
+			 * Sets PCNF1.MAXLEN too, so the receiver has to be
+			 * given the same value -- see rx.payload_len.
+			 */
+			uint8_t payload_len;
+
 			/** Callback to indicate that TX is finished. */
 			void (*cb)(void);
 		} modulated_tx;
@@ -149,6 +167,26 @@ struct radio_test_config {
 			 * Set to zero for continuous RX.
 			 */
 			uint32_t packets_num;
+
+			/**
+			 * Local delta: expected test-data bytes per packet,
+			 * matching the transmitter's modulated_tx.payload_len.
+			 *
+			 * PCNF1.MAXLEN, not a filter: the radio holds the
+			 * receiver busy for a MAXLEN-sized window per packet
+			 * whatever the on-air LENGTH says, so a receiver left
+			 * at 255 counts only one short packet per 263 bytes of
+			 * air and reads as catastrophic loss. Measured on a
+			 * keyboard<->dongle link at BLE 1M: 13-byte packets
+			 * scored 8.1% and 32-byte 16.6%, both within a point
+			 * of the (8 + len) / 263 that window predicts, while
+			 * 255-byte packets scored 98%+.
+			 *
+			 * So both ends have to agree on the length, as they
+			 * already must on the pattern (which sets the access
+			 * address). A packet longer than this is dropped.
+			 */
+			uint8_t payload_len;
 
 			/** Callback to indicate that RX is finished. */
 			void (*cb)(void);
@@ -204,6 +242,14 @@ struct radio_test_config {
 
 			/** Duty cycle. */
 			uint32_t duty_cycle;
+
+			/**
+			 * Local delta: test-data bytes per packet, 0-255.
+			 * See modulated_tx.payload_len. The duty-cycle timer is
+			 * derived from it, so a short packet shortens the on
+			 * time and the gap together, keeping the ratio.
+			 */
+			uint8_t payload_len;
 		} modulated_tx_duty_cycle;
 
 		struct {

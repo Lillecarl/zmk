@@ -620,7 +620,8 @@ static void radio_channel_set(nrf_radio_mode_t mode, uint8_t channel)
 	nrf_radio_frequency_set(NRF_RADIO, frequency);
 }
 
-static void radio_config(nrf_radio_mode_t mode, enum transmit_pattern pattern)
+static void radio_config(nrf_radio_mode_t mode, enum transmit_pattern pattern,
+			 uint8_t payload_len)
 {
 	nrf_radio_packet_conf_t packet_conf;
 
@@ -673,7 +674,12 @@ static void radio_config(nrf_radio_mode_t mode, enum transmit_pattern pattern)
 	 */
 	memset(&packet_conf, 0, sizeof(packet_conf));
 	packet_conf.lflen = RADIO_LENGTH_LENGTH_FIELD;
-	packet_conf.maxlen = (sizeof(tx_packet) - 1);
+	/* Local delta: was always sizeof(tx_packet) - 1. MAXLEN sizes the
+	 * receiver's per-packet window, so leaving it at the maximum costs a
+	 * short-packet receiver most of what is sent -- see rx.payload_len in
+	 * radio_test.h for the measurements.
+	 */
+	packet_conf.maxlen = payload_len;
 	packet_conf.statlen = 0;
 	packet_conf.balen = 4;
 	packet_conf.big_endian = true;
@@ -720,7 +726,7 @@ static void radio_config(nrf_radio_mode_t mode, enum transmit_pattern pattern)
 
 		/* preamble, address (BALEN + PREFIX), lflen, code indicator, TERM, payload, CRC */
 		total_payload_size = 10 + (packet_conf.balen + 1) + 1 + packet_conf.cilen +
-				  packet_conf.termlen + packet_conf.maxlen + RADIO_CRCCNF_LEN_Three;
+				  packet_conf.termlen + payload_len + RADIO_CRCCNF_LEN_Three;
 		break;
 
 #endif /* CONFIG_HAS_HW_NRF_RADIO_BLE_CODED */
@@ -734,7 +740,7 @@ static void radio_config(nrf_radio_mode_t mode, enum transmit_pattern pattern)
 		packet_conf.plen = NRF_RADIO_PREAMBLE_LENGTH_16BIT;
 
 		/* preamble, address (BALEN + PREFIX), lflen and payload */
-		total_payload_size = 2 + (packet_conf.balen + 1) + 1 + packet_conf.maxlen;
+		total_payload_size = 2 + (packet_conf.balen + 1) + 1 + payload_len;
 		break;
 #if defined(RADIO_MODE_MODE_Nrf_4Mbit0_5)
 	case NRF_RADIO_MODE_NRF_4MBIT_H_0_5:
@@ -746,7 +752,7 @@ static void radio_config(nrf_radio_mode_t mode, enum transmit_pattern pattern)
 		packet_conf.plen = NRF_RADIO_PREAMBLE_LENGTH_16BIT;
 
 		/* preamble, address (BALEN + PREFIX), lflen and payload */
-		total_payload_size = 2 + (packet_conf.balen + 1) + 1 + packet_conf.maxlen;
+		total_payload_size = 2 + (packet_conf.balen + 1) + 1 + payload_len;
 		break;
 #endif /* defined(RADIO_MODE_MODE_Nrf_4Mbit0_5) */
 
@@ -760,7 +766,7 @@ static void radio_config(nrf_radio_mode_t mode, enum transmit_pattern pattern)
 		packet_conf.plen = NRF_RADIO_PREAMBLE_LENGTH_16BIT;
 
 		/* preamble, address (BALEN + PREFIX), lflen and payload */
-		total_payload_size = 2 + (packet_conf.balen + 1) + 1 + packet_conf.maxlen;
+		total_payload_size = 2 + (packet_conf.balen + 1) + 1 + payload_len;
 		break;
 #endif /* defined(RADIO_MODE_MODE_Nrf_4Mbit0_25) */
 
@@ -774,7 +780,7 @@ static void radio_config(nrf_radio_mode_t mode, enum transmit_pattern pattern)
 		packet_conf.plen = NRF_RADIO_PREAMBLE_LENGTH_16BIT;
 
 		/* preamble, address (BALEN + PREFIX), lflen and payload */
-		total_payload_size = 2 + (packet_conf.balen + 1) + 1 + packet_conf.maxlen;
+		total_payload_size = 2 + (packet_conf.balen + 1) + 1 + payload_len;
 		break;
 #endif /* defined(RADIO_MODE_MODE_Nrf_4Mbit_0BT6) */
 
@@ -788,7 +794,7 @@ static void radio_config(nrf_radio_mode_t mode, enum transmit_pattern pattern)
 		packet_conf.plen = NRF_RADIO_PREAMBLE_LENGTH_16BIT;
 
 		/* preamble, address (BALEN + PREFIX), lflen and payload */
-		total_payload_size = 2 + (packet_conf.balen + 1) + 1 + packet_conf.maxlen;
+		total_payload_size = 2 + (packet_conf.balen + 1) + 1 + payload_len;
 		break;
 #endif /* defined(RADIO_MODE_MODE_Nrf_4Mbit_0BT4) */
 
@@ -801,38 +807,46 @@ static void radio_config(nrf_radio_mode_t mode, enum transmit_pattern pattern)
 		packet_conf.plen = NRF_RADIO_PREAMBLE_LENGTH_8BIT;
 
 		/* preamble, address (BALEN + PREFIX), lflen, and payload */
-		total_payload_size = 1 + (packet_conf.balen + 1) + 1 + packet_conf.maxlen;
+		total_payload_size = 1 + (packet_conf.balen + 1) + 1 + payload_len;
 		break;
 	}
 
 	nrf_radio_packet_configure(NRF_RADIO, &packet_conf);
 }
 
+/* Local delta: `payload_len` is a parameter rather than always
+ * RADIO_MAX_PAYLOAD_LEN - 1. See modulated_tx.payload_len in radio_test.h for
+ * why. Only the pattern fill shrinks with it; the buffer keeps its full size,
+ * so nothing here can run past it.
+ */
 static void generate_modulated_rf_packet(uint8_t mode,
-					 enum transmit_pattern pattern)
+					 enum transmit_pattern pattern,
+					 uint8_t payload_len)
 {
-	radio_config(mode, pattern);
-
 	/* One byte used for size, actual size is SIZE-1 */
 #if CONFIG_HAS_HW_NRF_RADIO_IEEE802154
 	if (mode == NRF_RADIO_MODE_IEEE802154_250KBIT) {
-		tx_packet[0] = IEEE_MAX_PAYLOAD_LEN - 1;
-	} else {
-		tx_packet[0] = sizeof(tx_packet) - 1;
+		/* 802.15.4 caps the PDU well below the BLE limit, and its
+		 * length byte counts the CRC. Left at the maximum: daisy's RF
+		 * group offers the BLE rates only, so nothing reaches here.
+		 */
+		payload_len = IEEE_MAX_PAYLOAD_LEN - 1;
 	}
-#else
-	tx_packet[0] = sizeof(tx_packet) - 1;
 #endif /* CONFIG_HAS_HW_NRF_RADIO_IEEE802154 */
+
+	radio_config(mode, pattern, payload_len);
+
+	tx_packet[0] = payload_len;
 
 	switch (pattern) {
 	case TRANSMIT_PATTERN_RANDOM:
-		sys_rand_get(tx_packet + 1, sizeof(tx_packet) - 1);
+		sys_rand_get(tx_packet + 1, payload_len);
 		break;
 	case TRANSMIT_PATTERN_11001100:
-		memset(tx_packet + 1, 0xCC, sizeof(tx_packet) - 1);
+		memset(tx_packet + 1, 0xCC, payload_len);
 		break;
 	case TRANSMIT_PATTERN_11110000:
-		memset(tx_packet + 1, 0xF0, sizeof(tx_packet) - 1);
+		memset(tx_packet + 1, 0xF0, payload_len);
 		break;
 	default:
 		/* Do nothing. */
@@ -937,10 +951,11 @@ static void radio_unmodulated_tx_carrier(uint8_t mode, int8_t txpower, uint8_t c
 }
 
 static void radio_modulated_tx_carrier(uint8_t mode, int8_t txpower, uint8_t channel,
-				       enum transmit_pattern pattern, uint32_t packets_num)
+				       enum transmit_pattern pattern, uint32_t packets_num,
+				       uint8_t payload_len)
 {
 	radio_disable();
-	generate_modulated_rf_packet(mode, pattern);
+	generate_modulated_rf_packet(mode, pattern, payload_len);
 
 	switch (mode) {
 #if CONFIG_HAS_HW_NRF_RADIO_IEEE802154 || CONFIG_HAS_HW_NRF_RADIO_BLE_CODED
@@ -996,7 +1011,7 @@ static void radio_modulated_tx_carrier(uint8_t mode, int8_t txpower, uint8_t cha
 }
 
 static void radio_rx(uint8_t mode, uint8_t channel, enum transmit_pattern pattern,
-		     uint32_t rx_packet_num)
+		     uint32_t rx_packet_num, uint8_t payload_len)
 {
 	radio_disable();
 
@@ -1018,7 +1033,7 @@ static void radio_rx(uint8_t mode, uint8_t channel, enum transmit_pattern patter
 
 	nrf_radio_packetptr_set(NRF_RADIO, rx_packet);
 
-	radio_config(mode, pattern);
+	radio_config(mode, pattern, payload_len);
 	radio_channel_set(mode, channel);
 
 	/* Local delta: don't zero the count mid-sweep. An RX sweep re-enters this
@@ -1079,7 +1094,8 @@ static void radio_sweep_start(uint8_t channel, uint32_t delay_ms)
 static void radio_modulated_tx_carrier_duty_cycle(uint8_t mode, int8_t txpower,
 						  uint8_t channel,
 						  enum transmit_pattern pattern,
-						  uint32_t duty_cycle)
+						  uint32_t duty_cycle,
+						  uint8_t payload_len)
 {
 	/* Lookup table with time per byte in each radio MODE
 	 * Mapped per NRF_RADIO->MODE available on nRF5-series devices
@@ -1089,7 +1105,7 @@ static void radio_modulated_tx_carrier_duty_cycle(uint8_t mode, int8_t txpower,
 	};
 
 	radio_disable();
-	generate_modulated_rf_packet(mode, pattern);
+	generate_modulated_rf_packet(mode, pattern, payload_len);
 
 	radio_mode_set(NRF_RADIO, mode);
 	nrf_radio_shorts_enable(NRF_RADIO,
@@ -1169,7 +1185,8 @@ static void radio_tx_sweep_with_sleep_modulated(const struct radio_test_config *
 				   cfg->params.tx_sweep_with_sleep_modulated.txpower,
 				   channel_sequence.sequence_array[mod_tx_sweep_ch_idx],
 				   cfg->params.tx_sweep_with_sleep_modulated.pattern,
-				   0);
+				   0,
+				   sizeof(tx_packet) - 1);
 	sweep_processing = false;
 
 	nrfx_timer_enable(&timer);
@@ -1224,13 +1241,15 @@ void radio_test_start(const struct radio_test_config *config)
 			config->params.modulated_tx.txpower,
 			config->params.modulated_tx.channel,
 			config->params.modulated_tx.pattern,
-			config->params.modulated_tx.packets_num);
+			config->params.modulated_tx.packets_num,
+			config->params.modulated_tx.payload_len);
 		break;
 	case RX:
 		radio_rx(config->mode,
 			config->params.rx.channel,
 			config->params.rx.pattern,
-			config->params.rx.packets_num);
+			config->params.rx.packets_num,
+			config->params.rx.payload_len);
 		break;
 	case TX_SWEEP:
 		radio_sweep_start(config->params.tx_sweep.channel_start,
@@ -1251,7 +1270,8 @@ void radio_test_start(const struct radio_test_config *config)
 			config->params.modulated_tx_duty_cycle.txpower,
 			config->params.modulated_tx_duty_cycle.channel,
 			config->params.modulated_tx_duty_cycle.pattern,
-			config->params.modulated_tx_duty_cycle.duty_cycle);
+			config->params.modulated_tx_duty_cycle.duty_cycle,
+			config->params.modulated_tx_duty_cycle.payload_len);
 		break;
 	case TX_SWEEP_WITH_SLEEP:
 		radio_tx_sweep_with_sleep(config->params.tx_sweep_with_sleep.txpower,
@@ -1422,7 +1442,8 @@ static void timer_handler(nrf_timer_event_t event_type, void *context)
 			radio_rx(config->mode,
 				current_channel,
 				config->params.rx_sweep.pattern,
-				0);
+				0,
+				sizeof(rx_packet) - 1);
 
 			channel_start = config->params.rx_sweep.channel_start;
 			channel_end = config->params.rx_sweep.channel_end;

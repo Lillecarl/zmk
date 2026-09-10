@@ -46,10 +46,12 @@ LOG_MODULE_DECLARE(daisy_factory, CONFIG_ZMK_LOG_LEVEL);
 
 /* The status payload has to fit one frame, and the host decodes it by fixed
  * offsets (aster's proto::RfStatus). Catch a field added on one side only. */
-BUILD_ASSERT(sizeof(struct daisy_factory_rf_status) == 23,
+BUILD_ASSERT(sizeof(struct daisy_factory_rf_status) == 24,
              "RF_STATUS payload changed; update aster's RfStatus decoder too");
 BUILD_ASSERT(offsetof(struct daisy_factory_rf_status, tx_packets) == 19,
              "tx_packets must stay after the prefix the dongle shares");
+BUILD_ASSERT(offsetof(struct daisy_factory_rf_status, payload_len) == 23,
+             "payload_len must stay after tx_packets, at the dongle's offset");
 BUILD_ASSERT(sizeof(struct daisy_factory_rf_status) <= DAISY_FACTORY_PAYLOAD_SIZE,
              "RF_STATUS payload does not fit in a factory frame");
 
@@ -331,8 +333,14 @@ static bool rf_pattern_to_driver(uint8_t wire, enum transmit_pattern *out) {
     }
 }
 
-/* RF_START payload layout, see factory.h. */
+/* RF_START payload layout, see factory.h. The 14th byte (payload_len) is
+ * optional; without it the transmitted length is the one every firmware before
+ * that field used. */
 #define RF_START_REQ_LEN 13
+#define RF_START_REQ_LEN_WITH_PAYLOAD_LEN 14
+/* Transmitted test-data bytes per packet when payload_len is absent or 0.
+ * What every firmware before that field sent, unconditionally. */
+#define RF_PAYLOAD_LEN_DEFAULT 255
 
 /* Configure and start a test mode. Any running test is cancelled first, so
  * the host can move between modes without an explicit RF_STOP. */
@@ -358,6 +366,13 @@ uint8_t daisy_factory_rf_start(const uint8_t *req, uint8_t req_len) {
     const uint16_t dwell_ms = sys_get_le16(&req[6]);
     const uint8_t duty = req[8];
     const uint32_t packets = sys_get_le32(&req[9]);
+    /* Absent and 0 both mean the default. 0 is the unset value on the
+     * dongle, whose config report has no length to make a field optional; the
+     * two agree so one host encoder serves both. */
+    uint8_t payload_len = (req_len >= RF_START_REQ_LEN_WITH_PAYLOAD_LEN) ? req[13] : 0;
+    if (payload_len == 0) {
+        payload_len = RF_PAYLOAD_LEN_DEFAULT;
+    }
 
     if (chan_start > DAISY_FACTORY_RF_CHANNEL_MAX || chan_end > DAISY_FACTORY_RF_CHANNEL_MAX) {
         return DAISY_FACTORY_ERR_BAD_ARG;
@@ -394,12 +409,14 @@ uint8_t daisy_factory_rf_start(const uint8_t *req, uint8_t req_len) {
         rf_config.params.modulated_tx.pattern = pattern;
         rf_config.params.modulated_tx.channel = chan_start;
         rf_config.params.modulated_tx.packets_num = packets;
+        rf_config.params.modulated_tx.payload_len = payload_len;
         rf_config.params.modulated_tx.cb = rf_test_finished;
         break;
     case RX:
         rf_config.params.rx.pattern = pattern;
         rf_config.params.rx.channel = chan_start;
         rf_config.params.rx.packets_num = packets;
+        rf_config.params.rx.payload_len = payload_len;
         rf_config.params.rx.cb = rf_test_finished;
         break;
     case TX_SWEEP:
@@ -422,6 +439,7 @@ uint8_t daisy_factory_rf_start(const uint8_t *req, uint8_t req_len) {
         rf_config.params.modulated_tx_duty_cycle.pattern = pattern;
         rf_config.params.modulated_tx_duty_cycle.channel = chan_start;
         rf_config.params.modulated_tx_duty_cycle.duty_cycle = duty;
+        rf_config.params.modulated_tx_duty_cycle.payload_len = payload_len;
         break;
     default:
         return DAISY_FACTORY_ERR_BAD_ARG;
@@ -439,6 +457,7 @@ uint8_t daisy_factory_rf_start(const uint8_t *req, uint8_t req_len) {
     rf_status.dwell_ms = dwell_ms;
     rf_status.duty = duty;
     rf_status.packets = packets;
+    rf_status.payload_len = payload_len;
     rf_status.running = 1;
 
     /* Where this run's TX count starts from. MODULATED_TX is zeroed by the
@@ -450,8 +469,8 @@ uint8_t daisy_factory_rf_start(const uint8_t *req, uint8_t req_len) {
 
     radio_test_start(&rf_config);
 
-    LOG_INF("rf: started mode %u on ch %u (%u MHz), %d dBm, %u packets", req[0], chan_start,
-            2400U + chan_start, tx_power, packets);
+    LOG_INF("rf: started mode %u on ch %u (%u MHz), %d dBm, %u packets of %u bytes", req[0],
+            chan_start, 2400U + chan_start, tx_power, packets, payload_len);
     return DAISY_FACTORY_OK;
 }
 
