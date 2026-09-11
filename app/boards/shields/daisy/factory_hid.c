@@ -1359,23 +1359,30 @@ static uint8_t handle_gpio_get(const uint8_t *req, uint8_t req_len, uint8_t *pay
     }
 
     const struct gpio_dt_spec *spec;
+    /* Whether an input driver owns the pin and has armed an interrupt on it.
+     * Such a pin must NOT be reconfigured here -- see below. */
+    bool owned;
     switch (req[0]) {
 #if HAS_PAIRING_BUTTON
     case DAISY_FACTORY_GPIO_PAIRING_BUTTON:
         spec = &pairing_button;
+        owned = true; /* zmk,input-gpio-direct (buttons_input) */
         break;
 #endif
 #if HAS_PROTOCOL_SWITCH
     case DAISY_FACTORY_GPIO_PROTOCOL_SWITCH:
         spec = &protocol_switch;
+        owned = true; /* gpio-keys */
         break;
 #endif
 #if HAS_LAYOUT_STRAPS
     case DAISY_FACTORY_GPIO_ISO_STRAP:
         spec = &iso_strap;
+        owned = false;
         break;
     case DAISY_FACTORY_GPIO_ANSI_STRAP:
         spec = &ansi_strap;
+        owned = false;
         break;
 #endif
     default:
@@ -1385,9 +1392,18 @@ static uint8_t handle_gpio_get(const uint8_t *req, uint8_t req_len, uint8_t *pay
     if (!gpio_is_ready_dt(spec)) {
         return DAISY_FACTORY_ERR_HW;
     }
-    /* Idempotent: configure as input each read so the query works whether or
-     * not another driver (e.g. gpio-keys) already owns the pin. */
-    if (gpio_pin_configure_dt(spec, GPIO_INPUT) < 0) {
+    /* Don't reconfigure a pin an input driver owns -- hygiene, not a fix for a
+     * known failure. gpio_pin_configure() is not interrupt-neutral on nRF:
+     * gpio_nrfx_pin_configure() resets the pin's trigger bookkeeping to
+     * NRFX_GPIOTE_TRIGGER_NONE and calls nrfx_gpiote_channel_free(), which
+     * releases the pin's GPIOTE channel in the allocator while leaving the TE
+     * configured and firing in hardware -- so a later allocation can hand that
+     * live channel to someone else. A read-only probe has no business doing
+     * either; both pins are already inputs, configured by their owner
+     * (input_gpio_direct for the button, gpio-keys for the switch). The straps
+     * have no owner, so they keep the configure as a safety net even though
+     * layout.c configures them at boot. */
+    if (!owned && gpio_pin_configure_dt(spec, GPIO_INPUT) < 0) {
         return DAISY_FACTORY_ERR_HW;
     }
     int level = gpio_pin_get_dt(spec);
