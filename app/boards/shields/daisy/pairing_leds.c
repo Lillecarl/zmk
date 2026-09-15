@@ -20,7 +20,7 @@ LOG_MODULE_REGISTER(daisy_pairing_leds, LOG_LEVEL_INF);
  *
  * The four white LEDs (pwm_led_w1..w4) form the `pairing_leds` pwm-leds node,
  * driven on pwm20 on both daisy_kb_evt and daisy_kb_dvt1. They are driven at
- * 100% duty (PAIRING_DUTY) via the LED API.
+ * 50% duty (PAIRING_DUTY) via the LED API.
  *
  * For the currently-active profile:
  *   connected             -> solid on
@@ -41,7 +41,7 @@ LOG_MODULE_REGISTER(daisy_pairing_leds, LOG_LEVEL_INF);
 
 #if HAS_PAIRING_LEDS && IS_ENABLED(CONFIG_ZMK_BLE)
 
-#define PAIRING_DUTY      100
+#define PAIRING_DUTY      50
 #define NUM_PAIRING_LEDS  DT_CHILD_NUM(PAIRING_LEDS_NODE)
 #define FAST_BLINK_MS     250
 #define SLOW_BLINK_MS     1500
