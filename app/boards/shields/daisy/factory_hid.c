@@ -562,25 +562,19 @@ static uint8_t handle_reboot(void) {
 }
 
 /* Return the keyboard to a factory-default state, then reboot. Action-only.
- * Clears every BLE bond (and selects profile 0), reverts all ZMK Studio
- * keymap/layout modifications to the firmware defaults, exits factory mode, and
- * warm-reboots. Each step persists its own state, so the deferred reboot (same
- * ack-first pattern as handle_reboot) only reboots after the writes are done.
- * Runs on the system workqueue, the context the ZMK BLE/keymap APIs expect. */
+ * Reverts all ZMK Studio keymap/layout modifications to the firmware defaults,
+ * exits factory mode, and warm-reboots. Each step persists its own state, so
+ * the deferred reboot (same ack-first pattern as handle_reboot) only reboots
+ * after the writes are done. Runs on the system workqueue, the context the ZMK
+ * keymap APIs expect.
+ *
+ * BLE bonds are deliberately left alone. The factory pairs the dongle to the
+ * keyboard and then resets everything else, so a reset that unpaired would undo
+ * the step before it; the keyboard cannot tell the dongle's bond from any other
+ * host's (nothing on either side reports the dongle's own address), so it
+ * cannot keep one and drop the rest. Bonds are cleared on their own terms with
+ * BT_CLEAR_BONDS (all profiles) or BT_UNPAIR (the active one). */
 static uint8_t handle_factory_reset(void) {
-#if IS_ENABLED(CONFIG_ZMK_BLE)
-    /* Unpair every profile (persisted immediately). This already selects
-     * profile 0; do it explicitly too so the "back to slot 1" intent is local
-     * to this handler and survives any change to clear_all_bonds. */
-    zmk_ble_clear_all_bonds();
-    zmk_ble_prof_select(0);
-    /* prof_select debounces the active-profile save by
-     * CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE (60 s); the reboot below fires long
-     * before that, so force the save now or the previously-selected profile is
-     * restored on the next boot (observed: reset ended up on slot 2). */
-    zmk_ble_save_profile_immediate();
-#endif
-
     /* Revert ZMK Studio keymap/layout changes to the firmware defaults -- the
      * same reset the Studio "restore stock settings" flow performs. Returns
      * -ENOTSUP when keymap settings storage isn't built in (nothing was
@@ -595,7 +589,7 @@ static uint8_t handle_factory_reset(void) {
      * clears it too (RAM-only), but make the intent explicit. */
     factory_mode = false;
 
-    LOG_INF("factory reset: state cleared, rebooting");
+    LOG_INF("factory reset: keymap defaults restored, bonds kept, rebooting");
     k_work_schedule(&reboot_work, K_MSEC(REBOOT_DELAY_MS));
     return DAISY_FACTORY_OK;
 }

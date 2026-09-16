@@ -119,12 +119,16 @@ enum daisy_factory_cmd {
      * jump). Acks first, then reboots shortly after so the response reaches the
      * host. No payload. */
     DAISY_FACTORY_CMD_REBOOT = 0x53,
-    /* Return the keyboard to a factory-default state, then reboot. Clears every
-     * BLE bond (and selects profile 0), reverts all ZMK Studio keymap/layout
-     * modifications to the built-in defaults, exits factory mode, and finally
-     * warm-reboots. Persisted changes are written before the reboot. Acks
-     * first, then reboots shortly after so the response reaches the host (same
-     * pattern as REBOOT). No payload. */
+    /* Return the keyboard to a factory-default state, then reboot. Reverts all
+     * ZMK Studio keymap/layout modifications to the built-in defaults, exits
+     * factory mode, and finally warm-reboots. Persisted changes are written
+     * before the reboot. Acks first, then reboots shortly after so the response
+     * reaches the host (same pattern as REBOOT). No payload.
+     *
+     * BLE bonds are NOT touched: the factory pairs the dongle and then resets
+     * everything else, and the keyboard cannot tell the dongle's bond from any
+     * other host's. Use BT_CLEAR_BONDS (every profile) or BT_UNPAIR (the active
+     * profile) to drop pairings. */
     DAISY_FACTORY_CMD_FACTORY_RESET = 0x54,
     /* Enter standby (ZMK deep sleep / SoC System OFF): suspend every device's
      * PM hook, then power the SoC off. Acks first, then enters standby
