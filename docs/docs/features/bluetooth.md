@@ -28,6 +28,8 @@ When pairing to a host device ZMK saves bond information to the selected profile
 
 A ZMK device may show as "connected" on multiple hosts at the same time. This is working as intended, and only the host associated with the active profile will receive keystrokes.
 
+If you would rather the keyboard hold only one connection at a time, set [`CONFIG_ZMK_BLE_SINGLE_CONNECTION`](../config/bluetooth.md) to `y`. Selecting a different profile then disconnects the previously selected profile's host, and a host bonded to a profile that is not selected is disconnected again if it connects.
+
 :::
 
 Failure to manage the profiles can result in unexpected/broken behavior with hosts due to bond key mismatches, so it is an important aspect of ZMK to understand.
