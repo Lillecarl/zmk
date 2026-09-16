@@ -6,6 +6,8 @@
 #include <zmk/event_manager.h>
 #include <zmk/events/ble_active_profile_changed.h>
 
+#include "protocol_switch.h"
+
 #if IS_ENABLED(CONFIG_DAISY_FACTORY)
 #include "factory_state.h"
 #else
@@ -125,8 +127,16 @@ static void refresh_pairing_leds(void)
     }
 
     /* Bluetooth off (wired mode via the protocol switch drops links and clears
-     * permit_adv): there is no pairing state to show, so leave every LED dark. */
-    if (!zmk_ble_adv_enabled_get()) {
+     * permit_adv): there is no pairing state to show, so leave every LED dark.
+     *
+     * The switch position is checked separately from permit_adv because of
+     * boot: we and protocol_switch.c both init at APPLICATION priority, and if
+     * we win the link order we would run before it has cleared permit_adv and
+     * light the LED for the ~500 ms until its deferred eval nudges us. That was
+     * visible on every wake from System OFF in wired mode (a keypress wakes the
+     * SoC via the matrix' GPIO SENSE, which is a reset + full reboot), so the
+     * keyboard flashed the pairing LED each time it was woken with no cable. */
+    if (!daisy_protocol_switch_is_wireless() || !zmk_ble_adv_enabled_get()) {
         return;
     }
 

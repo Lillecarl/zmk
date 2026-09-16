@@ -72,8 +72,7 @@ static struct k_work_q pq;
 
 enum mode { MODE_WIRED, MODE_WIRELESS };
 static enum mode current_mode = MODE_WIRED; /* replaced by the real reading at init */
-
-bool daisy_protocol_switch_is_wireless(void) { return current_mode == MODE_WIRELESS; }
+static bool mode_known;                     /* false while current_mode is still the default */
 
 static bool read_switch_wireless(void) {
     int lvl = gpio_pin_get_dt(&protocol_switch);
@@ -82,6 +81,19 @@ static bool read_switch_wireless(void) {
         return false;
     }
     return lvl != 0; /* logical-asserted == wireless (see header) */
+}
+
+bool daisy_protocol_switch_is_wireless(void) {
+    if (!mode_known) {
+        /* Asked before our SYS_INIT. Other APPLICATION-level inits (notably
+         * pairing_leds.c) share our priority, so link order decides who runs
+         * first, and answering with the MODE_WIRED default would be a guess.
+         * Read the pin instead -- gpio-keys configured it as an input back at
+         * POST_KERNEL, so this is valid from any APPLICATION init onwards. */
+        current_mode = read_switch_wireless() ? MODE_WIRELESS : MODE_WIRED;
+        mode_known = true;
+    }
+    return current_mode == MODE_WIRELESS;
 }
 
 static void enter_low_power(void) {
@@ -189,10 +201,11 @@ static void switch_input_cb(struct input_event *evt, void *user_data) {
         return;
     }
     enum mode new_mode = evt->value ? MODE_WIRELESS : MODE_WIRED;
-    if (new_mode == current_mode) {
+    if (mode_known && new_mode == current_mode) {
         return;
     }
     current_mode = new_mode;
+    mode_known = true;
     LOG_INF("protocol switch -> %s", current_mode == MODE_WIRELESS ? "wireless" : "wired");
     schedule_eval();
 }
@@ -218,7 +231,26 @@ static int protocol_switch_init(void) {
     k_thread_name_set(&pq.thread, "daisy_protocol");
 
     current_mode = read_switch_wireless() ? MODE_WIRELESS : MODE_WIRED;
+    mode_known = true;
     LOG_INF("boot protocol switch: %s", current_mode == MODE_WIRELESS ? "wireless" : "wired");
+
+#if IS_ENABLED(CONFIG_ZMK_BLE)
+    if (current_mode == MODE_WIRED) {
+        /* Clear permit_adv here rather than waiting for BOOT_EVAL_DELAY. Only
+         * the *enable* path needs BT_DEV_READY (see BOOT_EVAL_DELAY); this one
+         * just drops a flag that zmk_ble_complete_startup() reads later, from
+         * settings_load() in main() -- i.e. after every SYS_INIT. So a wired
+         * boot never advertises at all, instead of advertising for the first
+         * half second.
+         *
+         * That half second was visible: every wake from System OFF is a reset
+         * + reboot (a keypress wakes via the matrix' GPIO SENSE), and on a
+         * wired+unplugged wake the keyboard advertised and blinked the pairing
+         * LED until the deferred eval shut BLE down again. pairing_leds.c
+         * inits after us (see its SYS_INIT priority) so it now comes up dark. */
+        zmk_ble_adv_enabled_set(false);
+    }
+#endif
 
     /* Defer the first apply to the coop queue so it runs after BLE/endpoint
      * init has settled, and so a wired+unplugged boot powers off cleanly.
