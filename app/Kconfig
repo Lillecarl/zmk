@@ -188,13 +188,6 @@ config ZMK_BLE_EXPERIMENTAL_FEATURES
     help
       Enables experimental connection changes and security features.
 
-config ZMK_BLE_SINGLE_CONNECTION
-    bool "Only stay connected to one host at a time"
-    help
-      Restrict the keyboard to a single active host connection. Selecting another
-      profile disconnects the host of the previously selected profile, and hosts
-      bonded to a non-selected profile are dropped if they try to connect.
-
 config ZMK_BLE_PASSKEY_ENTRY
     bool "Require passkey entry on the keyboard to complete pairing"
     select RING_BUFFER

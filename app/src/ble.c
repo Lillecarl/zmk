@@ -446,21 +446,11 @@ int zmk_ble_prof_select(uint8_t index) {
         return 0;
     }
 
-    const uint8_t prev_profile = active_profile;
-
     active_profile = index;
     ble_save_profile();
 
-    // When only one host may be connected at a time, drop the previously selected profile's host
-    // first. Advertising for the newly selected profile is then started by the disconnected
-    // callback, once the connection slot has actually been released.
-    bool awaiting_disconnect =
-        IS_ENABLED(CONFIG_ZMK_BLE_SINGLE_CONNECTION) && zmk_ble_prof_disconnect(prev_profile) == 0;
-
-    if (!awaiting_disconnect) {
-        adv_burst_arm();
-        update_advertising();
-    }
+    adv_burst_arm();
+    update_advertising();
 
     raise_profile_changed_event();
 
@@ -885,15 +875,6 @@ static void connected(struct bt_conn *conn, uint8_t err) {
      * intact and nothing pending from whoever held the slot before. */
     atomic_and(&link_reassert_pending, ~BIT(bt_conn_index(conn)));
     link_reassert_spent[bt_conn_index(conn)] = false;
-
-    // Advertising is undirected, so any bonded host can pick up the connection. Hand it back if it
-    // isn't the host we're advertising for, unless the active profile is open for pairing.
-    if (IS_ENABLED(CONFIG_ZMK_BLE_SINGLE_CONNECTION) && !zmk_ble_active_profile_is_open() &&
-        !is_conn_active_profile(conn)) {
-        LOG_INF("Disconnecting %s, not the host of the selected profile", addr);
-        bt_conn_disconnect(conn, BT_HCI_ERR_REMOTE_USER_TERM_CONN);
-        return;
-    }
 
     update_advertising();
     apply_link_params();
