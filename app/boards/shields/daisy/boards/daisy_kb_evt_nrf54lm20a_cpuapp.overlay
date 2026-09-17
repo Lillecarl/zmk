@@ -60,6 +60,15 @@
     status = "disabled";
 };
 
+/* The mode switch is read directly by protocol_switch.c as a level/SENSE GPIO
+ * (which doubles as the System-OFF wake source). Disable the board's gpio-keys
+ * child so its EDGE_BOTH interrupt and PM-suspend hook can't fight over the
+ * pin, the same double-driver problem as pairing_button above. The label's
+ * `gpios` spec still resolves for protocol_switch.c and factory_hid.c. */
+&protocol_switch {
+    status = "disabled";
+};
+
 /* Daisy EVT matrix: KSI0..7 on P0.00..P0.07, KSO0..17 on P1.00..P1.17. */
 &matrix_input {
     col-gpios

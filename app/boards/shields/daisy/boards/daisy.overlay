@@ -16,3 +16,12 @@
         dr-gpios = <&gpio0 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
     };
 };
+
+/* The mode switch is read directly by protocol_switch.c as a level/SENSE GPIO
+ * (which doubles as the System-OFF wake source). Disable the board's gpio-keys
+ * child so its EDGE_BOTH interrupt and PM-suspend hook can't fight over the
+ * pin. The label's `gpios` spec still resolves for protocol_switch.c and
+ * factory_hid.c. */
+&protocol_switch {
+    status = "disabled";
+};

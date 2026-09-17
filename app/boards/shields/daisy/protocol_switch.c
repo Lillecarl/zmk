@@ -1,7 +1,6 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/init.h>
-#include <zephyr/input/input.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/poweroff.h>
@@ -24,12 +23,13 @@ static inline bool daisy_factory_mode_active(void) { return false; }
 LOG_MODULE_REGISTER(daisy_protocol_switch, LOG_LEVEL_INF);
 
 /*
- * Physical USB/BT mode switch (the `protocol_switch` gpio-keys node).
+ * Physical USB/BT mode switch (the `protocol_switch` node's `gpios`).
  *
  *   WIRED    -> USB only. BLE advertising is stopped and any live link is
  *               dropped. When the cable is unplugged there is nothing left to
  *               do, so the SoC enters System OFF to save power; flipping the
- *               switch to wireless wakes it (reset -> reboot into wireless).
+ *               switch to wireless or plugging the cable back in wakes it
+ *               (reset -> reboot, reading the new state on the way up).
  *
  *   WIRELESS -> BLE is enabled and made the preferred transport. ZMK's own
  *               transport fallback (endpoints.c) then does exactly what we
@@ -38,10 +38,33 @@ LOG_MODULE_REGISTER(daisy_protocol_switch, LOG_LEVEL_INF);
  *               (USB stays enumerated but stops carrying reports). See
  *               get_selected_transport().
  *
+ * The switch is read directly as a GPIO. The board files still declare it as
+ * a gpio-keys child of the same label, but the shield overlays set that child
+ * to status = "disabled"; we only borrow its `gpios` spec (as factory_hid.c
+ * does). A bistable switch is state, not an event stream, so there is no
+ * input-event bookkeeping: any edge schedules a settle delay, after which
+ * eval_work reads the pin and applies whatever position it finds.
+ *
+ * Interrupt idiom (the same one input_gpio_matrix uses): the pin is armed
+ * with a *level* trigger for the position the switch is NOT in, disarmed on
+ * the first fire, and re-armed by eval_work after the read. On nRF a level
+ * trigger is GPIO SENSE, so the very configuration that catches a flip while
+ * running is also the System-OFF wake source in wired+unplugged: sitting in
+ * wired == armed for "wireless", nothing to reconfigure before sys_poweroff().
+ * Level rather than edge also means a flip that lands between the read and
+ * the re-arm fires immediately instead of being lost, and no GPIOTE channel
+ * is consumed.
+ *
+ * Electrically the switch is SPDT: 100 k to 3.3 V in one position, 100 k to
+ * GND in the other, open during travel. Never add an internal pull in DT --
+ * the nRF's ~13 k pull would overpower the 100 k and pin the level. The
+ * settle delay covers the open interval.
+ *
  * Switch polarity (confirmed on daisy_kb_evt 2026-07-19 via
- * `aster --protocol-switch-state`, flipping both ways): the pin is
- * GPIO_ACTIVE_LOW and logical-asserted (gpio_pin_get_dt() == 1, gpio-keys
- * value == 1) is the WIRELESS position; de-asserted (0) is WIRED.
+ * `aster --protocol-switch-state`, flipping both ways): logical-asserted
+ * (gpio_pin_get_dt() == 1) is the WIRELESS position; de-asserted (0) is
+ * WIRED. The board files carry the physical polarity (ACTIVE_LOW on EVT,
+ * ACTIVE_HIGH on DVT1).
  *
  * The touchpad honours the same endpoint selection independently (its USB and
  * BLE passthroughs gate on zmk_endpoint_get_selected()), so pointer output
@@ -60,6 +83,11 @@ static const struct gpio_dt_spec protocol_switch =
  * doesn't trip a spurious power-down. */
 #define POWER_OFF_DELAY K_SECONDS(5)
 
+/* Settle time after an edge before the pin is trusted. The SPDT contacts are
+ * open mid-travel (pin floating behind 100 k), so one flip can produce several
+ * edges over tens of ms; each one just pushes the read out again. */
+#define SWITCH_SETTLE K_MSEC(50)
+
 /*
  * Dedicated cooperative work queue. The power evaluation runs on USB unplug,
  * and the system workqueue has historically frozen for the whole
@@ -71,8 +99,8 @@ static K_THREAD_STACK_DEFINE(pq_stack, 1024);
 static struct k_work_q pq;
 
 enum mode { MODE_WIRED, MODE_WIRELESS };
-static enum mode current_mode = MODE_WIRED; /* replaced by the real reading at init */
-static bool mode_known;                     /* false while current_mode is still the default */
+/* The position the policy was last applied for (set from the pin at init). */
+static enum mode current_mode = MODE_WIRED;
 
 static bool read_switch_wireless(void) {
     int lvl = gpio_pin_get_dt(&protocol_switch);
@@ -83,34 +111,38 @@ static bool read_switch_wireless(void) {
     return lvl != 0; /* logical-asserted == wireless (see header) */
 }
 
-bool daisy_protocol_switch_is_wireless(void) {
-    if (!mode_known) {
-        /* Asked before our SYS_INIT. Other APPLICATION-level inits (notably
-         * pairing_leds.c) share our priority, so link order decides who runs
-         * first, and answering with the MODE_WIRED default would be a guess.
-         * Read the pin instead -- gpio-keys configured it as an input back at
-         * POST_KERNEL, so this is valid from any APPLICATION init onwards. */
-        current_mode = read_switch_wireless() ? MODE_WIRELESS : MODE_WIRED;
-        mode_known = true;
+/* The live pin, not current_mode: callers (behavior_pairing.c, pairing_leds.c)
+ * ask at arbitrary times, including from SYS_INITs at our own APPLICATION
+ * priority that link order may run before protocol_switch_init(). The pin is
+ * configured as an input at POST_KERNEL (protocol_switch_pin_init) so the
+ * read is valid from any APPLICATION-level init onwards. */
+bool daisy_protocol_switch_is_wireless(void) { return read_switch_wireless(); }
+
+/* Arm a level trigger for the position the switch is NOT in (see header). */
+static void arm_switch_interrupt(bool wireless) {
+    int err = gpio_pin_interrupt_configure_dt(
+        &protocol_switch, wireless ? GPIO_INT_LEVEL_INACTIVE : GPIO_INT_LEVEL_ACTIVE);
+    if (err) {
+        LOG_ERR("failed to arm switch interrupt (%d)", err);
     }
-    return current_mode == MODE_WIRELESS;
 }
 
 static void enter_low_power(void) {
-    LOG_INF("wired + unplugged: entering System OFF (flip to wireless to wake)");
+    LOG_INF("wired + unplugged: entering System OFF (flip to wireless or plug in to wake)");
 
-    /* Arm wake on the switch reaching the wireless (active) position. On nRF a
-     * level interrupt configures GPIO SENSE, which drives the System-OFF DETECT
-     * wake; the SoC resets on wake and reboots — reading the switch as wireless
-     * on the way back up. Bonds/settings survive (flash-backed). */
-    int err = gpio_pin_interrupt_configure_dt(&protocol_switch, GPIO_INT_LEVEL_ACTIVE);
-    if (err) {
-        LOG_ERR("failed to arm switch wake (%d); powering off anyway", err);
-    }
-
-    /* TODO(HW-verify): also wake on USB VBUS replug. On nRF54L this is not a
-     * GPIO sense — it needs the USB regulator's VBUS-detect wake, which has to
-     * be validated on hardware. Until then a replug may need a manual reset. */
+    /* Wake sources, both of which reset the SoC into a fresh boot:
+     *  - the switch reaching the wireless position: its level trigger (GPIO
+     *    SENSE) is already armed for exactly that; re-assert it so the wake
+     *    never depends on eval_work ordering;
+     *  - VBUS rising: the nRF54L wakes from System OFF on its own VBUS pin
+     *    (VREGUSB stays started across usbd_disable(); datasheet §5.2,
+     *    HW-verified 2026-09-17).
+     * Bonds/settings survive (flash-backed).
+     *
+     * TODO(plan wired-sleep-wake-sources): the matrix rows and the pairing
+     * button idle with SENSE armed too, so a keypress also wakes us -- into a
+     * pointless 5 s boot. Disarm them (and cut the touchpad rail) here. */
+    arm_switch_interrupt(false);
 
     sys_poweroff(); /* does not return */
 }
@@ -161,6 +193,19 @@ static K_WORK_DELAYABLE_DEFINE(power_work, power_work_handler);
 
 static void eval_work_handler(struct k_work *work) {
     ARG_UNUSED(work);
+
+    bool wireless = read_switch_wireless();
+    enum mode new_mode = wireless ? MODE_WIRELESS : MODE_WIRED;
+    if (new_mode != current_mode) {
+        current_mode = new_mode;
+        LOG_INF("protocol switch -> %s", wireless ? "wireless" : "wired");
+    }
+
+    /* Re-arm for the opposite position before applying policy: a flip that
+     * landed during the settle window then fires straight away (level
+     * trigger) and simply reschedules us. */
+    arm_switch_interrupt(wireless);
+
     apply_policy();
 
     if (current_mode == MODE_WIRED && !zmk_usb_is_powered()) {
@@ -192,24 +237,18 @@ static void schedule_eval(void) { k_work_reschedule_for_queue(&pq, &eval_work, K
  */
 #define BOOT_EVAL_DELAY K_MSEC(500)
 
-/* gpio-keys turns the switch into INPUT_KEY_1 key events (value 1 = asserted =
- * wireless). Listen on all input devices and filter by code — the board's
- * buttons node has no label to bind to directly, and this matches activity.c. */
-static void switch_input_cb(struct input_event *evt, void *user_data) {
-    ARG_UNUSED(user_data);
-    if (evt->type != INPUT_EV_KEY || evt->code != INPUT_KEY_1) {
-        return;
-    }
-    enum mode new_mode = evt->value ? MODE_WIRELESS : MODE_WIRED;
-    if (mode_known && new_mode == current_mode) {
-        return;
-    }
-    current_mode = new_mode;
-    mode_known = true;
-    LOG_INF("protocol switch -> %s", current_mode == MODE_WIRELESS ? "wireless" : "wired");
-    schedule_eval();
+static void switch_isr(const struct device *port, struct gpio_callback *cb,
+                       gpio_port_pins_t pins) {
+    ARG_UNUSED(port);
+    ARG_UNUSED(cb);
+    ARG_UNUSED(pins);
+    /* Level trigger: it would keep firing for as long as the switch sits in
+     * its new position. Disarm until eval_work has read the settled position
+     * and re-armed for the opposite one. */
+    gpio_pin_interrupt_configure_dt(&protocol_switch, GPIO_INT_DISABLE);
+    k_work_reschedule_for_queue(&pq, &eval_work, SWITCH_SETTLE);
 }
-INPUT_CALLBACK_DEFINE(NULL, switch_input_cb, NULL);
+static struct gpio_callback switch_cb;
 
 static int protocol_switch_usb_listener(const zmk_event_t *eh) {
     if (as_zmk_usb_conn_state_changed(eh)) {
@@ -221,18 +260,31 @@ static int protocol_switch_usb_listener(const zmk_event_t *eh) {
 ZMK_LISTENER(daisy_protocol_switch, protocol_switch_usb_listener);
 ZMK_SUBSCRIPTION(daisy_protocol_switch, zmk_usb_conn_state_changed);
 
-static int protocol_switch_init(void) {
+/* Configure the pin early, at POST_KERNEL. daisy_protocol_switch_is_wireless()
+ * reads it directly, and other APPLICATION-level inits (pairing_leds.c) may
+ * call it before protocol_switch_init() below. An unconfigured nRF input reads
+ * 0 (input buffer disconnected), which on an active-low board would be
+ * "wireless". Interrupt setup needs the work queue and waits for init. */
+static int protocol_switch_pin_init(void) {
     if (!gpio_is_ready_dt(&protocol_switch)) {
         LOG_ERR("protocol switch gpio not ready");
         return -ENODEV;
     }
+    int err = gpio_pin_configure_dt(&protocol_switch, GPIO_INPUT);
+    if (err) {
+        LOG_ERR("failed to configure protocol switch pin (%d)", err);
+    }
+    return err;
+}
+SYS_INIT(protocol_switch_pin_init, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
+static int protocol_switch_init(void) {
     k_work_queue_start(&pq, pq_stack, K_THREAD_STACK_SIZEOF(pq_stack), K_PRIO_COOP(7), NULL);
     k_thread_name_set(&pq.thread, "daisy_protocol");
 
-    current_mode = read_switch_wireless() ? MODE_WIRELESS : MODE_WIRED;
-    mode_known = true;
-    LOG_INF("boot protocol switch: %s", current_mode == MODE_WIRELESS ? "wireless" : "wired");
+    bool wireless = read_switch_wireless();
+    current_mode = wireless ? MODE_WIRELESS : MODE_WIRED;
+    LOG_INF("boot protocol switch: %s", wireless ? "wireless" : "wired");
 
 #if IS_ENABLED(CONFIG_ZMK_BLE)
     if (current_mode == MODE_WIRED) {
@@ -246,11 +298,18 @@ static int protocol_switch_init(void) {
          * That half second was visible: every wake from System OFF is a reset
          * + reboot (a keypress wakes via the matrix' GPIO SENSE), and on a
          * wired+unplugged wake the keyboard advertised and blinked the pairing
-         * LED until the deferred eval shut BLE down again. pairing_leds.c
-         * inits after us (see its SYS_INIT priority) so it now comes up dark. */
+         * LED until the deferred eval shut BLE down again. */
         zmk_ble_adv_enabled_set(false);
     }
 #endif
+
+    gpio_init_callback(&switch_cb, switch_isr, BIT(protocol_switch.pin));
+    int err = gpio_add_callback_dt(&protocol_switch, &switch_cb);
+    if (err) {
+        LOG_ERR("failed to add switch callback (%d)", err);
+        return err;
+    }
+    arm_switch_interrupt(wireless);
 
     /* Defer the first apply to the coop queue so it runs after BLE/endpoint
      * init has settled, and so a wired+unplugged boot powers off cleanly.
