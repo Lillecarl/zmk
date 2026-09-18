@@ -358,8 +358,13 @@ static int input_direct_init(const struct device *dev) {
 #if IS_ENABLED(CONFIG_PM_DEVICE_RUNTIME)
     pm_device_runtime_enable(dev);
 #else
-    input_direct_init_inputs(dev);
-    input_direct_enable(dev);
+    // Arm through the PM hook rather than calling input_direct_init_inputs/
+    // input_direct_enable directly: init_suspended() above set the PM state
+    // to SUSPENDED, and arming behind its back leaves it there while the
+    // hardware is live. A later pm_device_action_run(SUSPEND) -- e.g. a
+    // System OFF entry that must NOT wake on keys -- then returns -EALREADY
+    // without ever running the hook, and SENSE stays armed.
+    pm_device_action_run(dev, PM_DEVICE_ACTION_RESUME);
 #endif
 
 #else
