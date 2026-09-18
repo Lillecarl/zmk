@@ -183,9 +183,11 @@ static void update_work(struct k_work *work) {
     LOG_INF("updating touchpad firmware 0x%04x -> 0x%04x%s", info.version, img->version,
             in_rom ? " (pad in ROM mode)" : "");
     set_state(DAISY_TP_UPDATE_RUNNING, 0);
+    int64_t t0 = k_uptime_get();
     err = pixart_tp_update(touchpad, img, progress_cb, NULL);
     k_mutex_lock(&status_lock, K_FOREVER);
     status.attempts++;
+    status.last_duration_ms = (uint32_t)(k_uptime_get() - t0);
     k_mutex_unlock(&status_lock);
 
     if (pixart_tp_read_info(touchpad, &info) == 0) {

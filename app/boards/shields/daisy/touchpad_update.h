@@ -34,6 +34,7 @@ struct daisy_touchpad_update_status {
     int last_err;         /* errno of the last failure, 0 otherwise */
     uint8_t attempts;     /* flash attempts this power cycle */
     uint8_t progress_pct; /* PROGRAM stage progress while running */
+    uint32_t last_duration_ms; /* wall time of the last flash attempt, 0 if none */
     uint16_t embedded_version;
     /* Last successful read of the pad; valid when info_valid. */
     bool info_valid;

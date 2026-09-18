@@ -356,6 +356,8 @@ enum daisy_factory_cmd {
      *   [9:10] pad part ID, LE (0x0360)
      *   [11]   pad boot status (0x8c = ROM: flash image invalid,
      *          0x9c = flashless)
+     *   [12:13] wall time of the last flash attempt in ms, LE (0 if none;
+     *          saturates at 0xFFFF)
      * Cheap, never touches the pad, always allowed. This is how to tell a
      * host whose feature reports are failing with -EBUSY that an update is
      * in progress rather than that the pad is broken. */

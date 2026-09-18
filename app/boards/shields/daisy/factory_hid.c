@@ -1125,7 +1125,8 @@ static uint8_t handle_touchpad_fw_status(uint8_t *payload, uint8_t *out_len) {
     sys_put_le16(st.pad_version, &payload[7]);
     sys_put_le16(st.pad_part_id, &payload[9]);
     payload[11] = st.pad_boot_status;
-    *out_len = 12;
+    sys_put_le16((uint16_t)MIN(st.last_duration_ms, UINT16_MAX), &payload[12]);
+    *out_len = 14;
     return DAISY_FACTORY_OK;
 #endif
 }
