@@ -1,14 +1,17 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/regulator.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/pm/device.h>
 #include <zephyr/sys/poweroff.h>
 
 #include <zmk/ble.h>
 #include <zmk/endpoints.h>
 #include <zmk/events/ble_active_profile_changed.h>
 #include <zmk/events/usb_conn_state_changed.h>
+#include <zmk/pm.h>
 #include <zmk/usb.h>
 
 #include "protocol_switch.h"
@@ -127,21 +130,84 @@ static void arm_switch_interrupt(bool wireless) {
     }
 }
 
+/* Rails and detectors touched on the way into System OFF. Both are optional in
+ * DT so the file still builds for dev kits. */
+#define TP_POWER_NODE DT_NODELABEL(tp_power)
+#define VREGUSB_NODE  DT_NODELABEL(vregusb)
+
+/* Cut the touchpad rail (P3.12). System OFF retains GPIO output state, so the
+ * pad would otherwise sit powered for the whole sleep: PCT1036QN-L draws 0.2 mA
+ * in Modern Standby, ~300x the SoC's System OFF current. regulator-boot-on
+ * seeds the refcount at 1, so one disable drops it; the wake is a reboot and
+ * boot-on brings the rail back before the driver's init re-probes the pad from
+ * cold. */
+static void cut_touchpad_rail(void) {
+#if DT_NODE_HAS_STATUS(TP_POWER_NODE, okay)
+    int err = regulator_disable(DEVICE_DT_GET(TP_POWER_NODE));
+    if (err) {
+        LOG_WRN("failed to cut touchpad rail (%d)", err);
+    }
+#endif
+}
+
+/* VBUS detection lives in VREGUSB. The udc driver starts it at init and
+ * usbd_disable() leaves it running, so this is normally just a refcount bump --
+ * but the replug wake must not hinge on that lifecycle detail. */
+static void ensure_vbus_detect(void) {
+#if DT_NODE_HAS_STATUS(VREGUSB_NODE, okay)
+    int err = regulator_enable(DEVICE_DT_GET(VREGUSB_NODE));
+    if (err) {
+        LOG_WRN("failed to start VREGUSB (%d); replug may not wake", err);
+    }
+#endif
+}
+
 static void enter_low_power(void) {
     LOG_INF("wired + unplugged: entering System OFF (flip to wireless or plug in to wake)");
 
-    /* Wake sources, both of which reset the SoC into a fresh boot:
+    /*
+     * Wake sources, both of which reset the SoC into a fresh boot:
      *  - the switch reaching the wireless position: its level trigger (GPIO
-     *    SENSE) is already armed for exactly that; re-assert it so the wake
-     *    never depends on eval_work ordering;
+     *    SENSE) is already armed for exactly that (see header), re-asserted
+     *    below so the wake never depends on eval_work ordering;
      *  - VBUS rising: the nRF54L wakes from System OFF on its own VBUS pin
-     *    (VREGUSB stays started across usbd_disable(); datasheet §5.2,
-     *    HW-verified 2026-09-17).
+     *    (datasheet §5.2, HW-verified 2026-09-17).
+     * Nothing else. The matrix and the pairing button also idle with SENSE
+     * armed -- that is ZMK's deep-sleep wake -- but here a keypress would only
+     * buy a pointless 5 s boot, so they are disarmed first. Same recipe as
+     * zmk_pm_soft_off(): a `wakeup-source` device is skipped by
+     * zmk_pm_suspend_devices(), so drop the wakeup flag and suspend it
+     * ourselves; the matrix/direct PM hooks disable their row interrupts.
      * Bonds/settings survive (flash-backed).
-     *
-     * TODO(plan wired-sleep-wake-sources): the matrix rows and the pairing
-     * button idle with SENSE armed too, so a keypress also wakes us -- into a
-     * pointless 5 s boot. Disarm them (and cut the touchpad rail) here. */
+     */
+    const struct device *devs;
+    size_t devc = z_device_get_all_static(&devs);
+    for (size_t i = 0; i < devc; i++) {
+        const struct device *dev = &devs[i];
+        if (!device_is_ready(dev) || !pm_device_wakeup_is_enabled(dev)) {
+            continue;
+        }
+        pm_device_wakeup_enable(dev, false);
+        /* -EALREADY is a failure here too: it means the driver's PM state says
+         * suspended while its interrupts are live (hook never ran), so the
+         * device would still wake us. */
+        int err = pm_device_action_run(dev, PM_DEVICE_ACTION_SUSPEND);
+        if (err) {
+            LOG_WRN("failed to suspend wake source %s (%d)", dev->name, err);
+        }
+    }
+
+    cut_touchpad_rail();
+
+    /* Everything else (touchpad DR interrupt, I2C, PWM) -- what activity.c
+     * does before its own sys_poweroff(). A failure is not worth staying awake
+     * for: we are powering off regardless. */
+    if (zmk_pm_suspend_devices() < 0) {
+        LOG_WRN("not every device suspended; powering off anyway");
+    }
+
+    ensure_vbus_detect();
+
     arm_switch_interrupt(false);
 
     sys_poweroff(); /* does not return */
