@@ -335,6 +335,39 @@ enum daisy_factory_cmd {
      * out-of-range position is a legitimate test. */
     DAISY_FACTORY_CMD_TOUCHPAD_INJECT_SWEEP = 0x95,
 
+    /* --- touchpad firmware (group 0x9, cont.) ------------------------------
+     *
+     * The keyboard image carries one PixArt touchpad firmware release and
+     * converges the pad to it a few seconds after boot (touchpad_update.c,
+     * CONFIG_DAISY_TOUCHPAD_UPDATE). These two commands make that visible
+     * and drivable from the bench. */
+
+    /* Report the updater's state. No payload in; out:
+     *   [0]    state: 0 unknown (boot check not run yet), 1 in sync,
+     *          2 skipped (factory mode), 3 skipped (battery below gate),
+     *          4 running, 5 done (flashed this power cycle), 6 failed,
+     *          7 unsupported (flashless pad / wrong part ID)
+     *   [1]    last error as -errno (0 none)
+     *   [2]    flash attempts this power cycle
+     *   [3]    program progress %, while running
+     *   [4:5]  embedded firmware version, LE (e.g. 0x1204)
+     *   [6]    1 if bytes 7.. hold a real pad read, 0 if never read
+     *   [7:8]  pad firmware version, LE
+     *   [9:10] pad part ID, LE (0x0360)
+     *   [11]   pad boot status (0x8c = ROM: flash image invalid,
+     *          0x9c = flashless)
+     * Cheap, never touches the pad, always allowed. This is how to tell a
+     * host whose feature reports are failing with -EBUSY that an update is
+     * in progress rather than that the pad is broken. */
+    DAISY_FACTORY_CMD_TOUCHPAD_FW_STATUS = 0x96,
+    /* Start an update now, bypassing the factory-mode and battery gates.
+     * payload in: [flags u8]: bit0 = force, flash even when the pad already
+     * runs the embedded version. Returns immediately; poll TOUCHPAD_FW_STATUS
+     * for progress (a few seconds). While it runs, every touchpad feature
+     * GET/SET from the host fails. LOCKED unless factory mode is active or an
+     * update is already running; UNSUPPORTED without a touchpad. */
+    DAISY_FACTORY_CMD_TOUCHPAD_FW_UPDATE = 0x97,
+
     /* group 0xA: PERT (packet-error-rate test via Bluetooth Direct Test Mode)
      *
      * Raw-PHY per-channel PER measurement between the keyboard and a test

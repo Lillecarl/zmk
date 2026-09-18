@@ -140,6 +140,9 @@ static const struct gpio_dt_spec rgb_gpio[] = {
 #include "touchpad_power.h"
 static const struct device *const touchpad = DEVICE_DT_GET(DT_NODELABEL(touchpad));
 #endif
+#if IS_ENABLED(CONFIG_DAISY_TOUCHPAD_UPDATE)
+#include "touchpad_update.h"
+#endif
 
 /* PERT (group 0xA): raw-PHY packet-error-rate testing via the controller's
  * Direct Test Mode. Requires CONFIG_BT_CTLR_DTM_HCI=y (daisy.conf) on top of
@@ -1100,6 +1103,55 @@ static uint8_t handle_touchpad_reg_write(const uint8_t *req, uint8_t req_len) {
 #endif
 }
 
+/* --- touchpad firmware (0x96-0x97) ----------------------------------------
+ *
+ * Thin wrappers over touchpad_update.c. STATUS reads the updater's cached
+ * state and never touches the pad, so it works while an update is running
+ * (which is exactly when a host needs it). UPDATE is gated on factory mode
+ * like every other command that takes the pad away from the host. */
+
+static uint8_t handle_touchpad_fw_status(uint8_t *payload, uint8_t *out_len) {
+#if !IS_ENABLED(CONFIG_DAISY_TOUCHPAD_UPDATE)
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    struct daisy_touchpad_update_status st;
+    daisy_touchpad_update_get_status(&st);
+    payload[0] = (uint8_t)st.state;
+    payload[1] = (uint8_t)(-st.last_err);
+    payload[2] = st.attempts;
+    payload[3] = st.progress_pct;
+    sys_put_le16(st.embedded_version, &payload[4]);
+    payload[6] = st.info_valid ? 1 : 0;
+    sys_put_le16(st.pad_version, &payload[7]);
+    sys_put_le16(st.pad_part_id, &payload[9]);
+    payload[11] = st.pad_boot_status;
+    *out_len = 12;
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+static uint8_t handle_touchpad_fw_update(const uint8_t *req, uint8_t req_len) {
+#if !IS_ENABLED(CONFIG_DAISY_TOUCHPAD_UPDATE)
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    if (req_len < 1) {
+        return DAISY_FACTORY_ERR_BAD_LENGTH;
+    }
+    if (!daisy_factory_mode_active()) {
+        LOG_WRN("TOUCHPAD_FW_UPDATE refused, factory mode is not active");
+        return DAISY_FACTORY_ERR_LOCKED;
+    }
+    int err = daisy_touchpad_update_request(req[0] & BIT(0));
+    if (err == -EBUSY) {
+        return DAISY_FACTORY_ERR_LOCKED;
+    }
+    if (err == -ENODEV) {
+        return DAISY_FACTORY_ERR_UNSUPPORTED;
+    }
+    return err ? DAISY_FACTORY_ERR_HW : DAISY_FACTORY_OK;
+#endif
+}
+
 /* --- synthetic touchpad input (0x93-0x95) --------------------------------
  *
  * All three commands funnel into hid_touchpad_inject_input(), which hands the
@@ -1879,6 +1931,13 @@ static void process_work_handler(struct k_work *work) {
         status = handle_touchpad_inject_sweep(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
                                               req_buf[DAISY_FACTORY_OFF_LEN], payload,
                                               &payload_len);
+        break;
+    case DAISY_FACTORY_CMD_TOUCHPAD_FW_STATUS:
+        status = handle_touchpad_fw_status(payload, &payload_len);
+        break;
+    case DAISY_FACTORY_CMD_TOUCHPAD_FW_UPDATE:
+        status = handle_touchpad_fw_update(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],
+                                           req_buf[DAISY_FACTORY_OFF_LEN]);
         break;
     case DAISY_FACTORY_CMD_GPIO_GET:
         status = handle_gpio_get(&req_buf[DAISY_FACTORY_OFF_PAYLOAD], req_buf[DAISY_FACTORY_OFF_LEN],
