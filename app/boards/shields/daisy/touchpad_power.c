@@ -57,6 +57,10 @@
 static inline bool daisy_factory_mode_active(void) { return false; }
 #endif
 
+#if IS_ENABLED(CONFIG_DAISY_TOUCHPAD_UPDATE)
+#include "touchpad_update_state_changed.h"
+#endif
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(daisy_tp_power, CONFIG_ZMK_LOG_LEVEL);
 
@@ -137,12 +141,17 @@ static bool host_reachable(void) {
     }
 }
 
-static void tp_follow_host_work(struct k_work *work) {
-    /* The pad boots in full operation (the driver sends SET_POWER on at
-     * init), so that's the baseline state. */
-    static bool pad_on = true;
+/* The pad boots in full operation (the driver sends SET_POWER on at init),
+ * so that's the baseline state. Reset to it after a firmware update too: the
+ * update ends with a reset into application mode, i.e. a fresh boot. */
+static bool pad_on = true;
 
-    if (daisy_factory_mode_active()) {
+/* While the firmware updater holds the pad every driver call returns -EBUSY;
+ * stand down until it announces it is done. */
+static bool tp_update_running;
+
+static void tp_follow_host_work(struct k_work *work) {
+    if (daisy_factory_mode_active() || tp_update_running) {
         return;
     }
 
@@ -170,6 +179,16 @@ void daisy_touchpad_user_set_enabled(bool enabled) {
  * workqueue where a short blocking write is fine (the factory handler and
  * key-inject already run there). */
 static int tp_power_event_listener(const zmk_event_t *eh) {
+#if IS_ENABLED(CONFIG_DAISY_TOUCHPAD_UPDATE)
+    const struct daisy_touchpad_update_state_changed *upd =
+        as_daisy_touchpad_update_state_changed(eh);
+    if (upd) {
+        tp_update_running = upd->running;
+        if (!upd->running) {
+            pad_on = true;
+        }
+    }
+#endif
     k_work_submit(&tp_follow_work);
     return ZMK_EV_EVENT_BUBBLE;
 }
@@ -187,6 +206,9 @@ ZMK_SUBSCRIPTION(daisy_tp_power, zmk_ble_active_profile_changed);
  * re-runs it on exit, so the pad could stay stale until the next endpoint
  * event. */
 ZMK_SUBSCRIPTION(daisy_tp_power, daisy_factory_mode_changed);
+#endif
+#if IS_ENABLED(CONFIG_DAISY_TOUCHPAD_UPDATE)
+ZMK_SUBSCRIPTION(daisy_tp_power, daisy_touchpad_update_state_changed);
 #endif
 
 /* pad_on's baseline is "on" and only events correct it, so on a hostless

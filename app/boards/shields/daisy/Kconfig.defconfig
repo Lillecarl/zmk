@@ -49,6 +49,44 @@ config RADIO_TEST_RX_TIMEOUT
       radio. Carried over from the radio_test sample's Kconfig, which the
       vendored driver in rf/ still reads.
 
+config DAISY_TOUCHPAD_UPDATE
+    bool "Converge the touchpad firmware to the image built into the keyboard"
+    default y
+    depends on ZMK_HID_TOUCHPAD
+    select HID_TOUCHPAD_PIXART_UPDATE
+    help
+      Carry a PixArt PJP360 touchpad firmware release in the keyboard image
+      (touchpad_firmware/, one file selected by DAISY_TOUCHPAD_FW_FILE) and,
+      after boot, flash the pad whenever its version differs from the
+      embedded one in either direction, or whenever it is running from ROM
+      because its flash image is invalid. Pad firmware then follows keyboard
+      firmware: the host-side fwupd path keeps working but is undone at the
+      next boot unless it wrote the embedded version.
+
+      The update runs on its own thread, claims the pad (host feature
+      accesses fail with -EBUSY meanwhile) and takes a few seconds. It is
+      skipped in factory mode and, unless the pad is in ROM mode, on battery
+      below DAISY_TOUCHPAD_UPDATE_MIN_SOC. See
+      aster plans/touchpad-firmware-self-update.md.
+
+config DAISY_TOUCHPAD_FW_FILE
+    string "Touchpad firmware file to embed (in touchpad_firmware/)"
+    depends on DAISY_TOUCHPAD_UPDATE
+    default "Daisy_FW1204_20260907_CAB.bin"
+    help
+      Vendor FWHD file to embed. The build parses and CRC-checks it
+      (touchpad_firmware/gen_tp_fw.py) and fails on a malformed file.
+
+config DAISY_TOUCHPAD_UPDATE_MIN_SOC
+    int "Minimum battery SOC to start a touchpad update when not USB-powered"
+    depends on DAISY_TOUCHPAD_UPDATE
+    range 0 100
+    default 30
+    help
+      Below this the boot-time version convergence is skipped (retried at the
+      next boot). Not applied when the pad is in ROM mode: an invalid image
+      makes the pad useless, so recovery always runs.
+
 config DAISY_CHARGE_TIMEOUT_RECOVERY
     bool "Recover from nPM1300 charge safety-timer expiry"
     default y

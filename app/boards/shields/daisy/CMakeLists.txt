@@ -19,6 +19,28 @@ if(CONFIG_ZMK_HID_TOUCHPAD)
   zephyr_library_sources(touchpad_power.c)
   zephyr_library_sources(behavior_touchpad_power.c)
 endif()
+# Touchpad firmware carried in the keyboard image: parse + CRC-check the
+# vendor FWHD file at build time and emit the two flash sections as .rodata
+# (~7 KB). A malformed file fails the build; a silently wrong blob bricks pads.
+if(CONFIG_DAISY_TOUCHPAD_UPDATE)
+  set(tp_fw_src ${CMAKE_CURRENT_SOURCE_DIR}/touchpad_firmware/${CONFIG_DAISY_TOUCHPAD_FW_FILE})
+  set(tp_fw_gen ${CMAKE_CURRENT_BINARY_DIR}/tp_fw_blob.inc)
+  add_custom_command(
+    OUTPUT ${tp_fw_gen}
+    COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/touchpad_firmware/gen_tp_fw.py
+            ${tp_fw_src} ${tp_fw_gen}
+    DEPENDS ${tp_fw_src} ${CMAKE_CURRENT_SOURCE_DIR}/touchpad_firmware/gen_tp_fw.py
+    COMMENT "Generating touchpad firmware blob from ${CONFIG_DAISY_TOUCHPAD_FW_FILE}"
+    VERBATIM)
+  # Same shape as Zephyr's generate_inc_file_for_target(): the blob is an
+  # include file, and a target dependency orders its generation before the
+  # library that includes it compiles (the library is created in a parent
+  # scope, so a generated *source* would not be accepted here).
+  add_custom_target(daisy_tp_fw_blob DEPENDS ${tp_fw_gen})
+  add_dependencies(${ZEPHYR_CURRENT_LIBRARY} daisy_tp_fw_blob)
+  zephyr_library_include_directories(${CMAKE_CURRENT_BINARY_DIR})
+  zephyr_library_sources(touchpad_update.c)
+endif()
 #zephyr_library_sources(pmic.c)
 #zephyr_library_sources(leds.c)
 zephyr_library_sources(behavior_pairing.c)
