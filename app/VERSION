@@ -7,7 +7,7 @@ VERSION_MINOR = 4
 # x-release-please-end
 
 # x-release-please-start-patch
-PATCHLEVEL = 3
+PATCHLEVEL = 4
 # x-release-please-end
 
 VERSION_TWEAK = 0
