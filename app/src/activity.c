@@ -116,14 +116,16 @@ ZMK_LISTENER(activity, activity_event_listener);
 ZMK_SUBSCRIPTION(activity, zmk_position_state_changed);
 ZMK_SUBSCRIPTION(activity, zmk_sensor_event);
 
-#if IS_ENABLED(CONFIG_ZMK_POINTING)
-
 static void note_activity_work_cb(struct k_work *_work) { note_activity(); }
 
 K_WORK_DEFINE(note_activity_work, note_activity_work_cb);
 
+void zmk_activity_note(void) { k_work_submit(&note_activity_work); }
+
+#if IS_ENABLED(CONFIG_ZMK_POINTING)
+
 static void activity_input_listener(struct input_event *ev, void *user_data) {
-    k_work_submit(&note_activity_work);
+    zmk_activity_note();
 }
 
 INPUT_CALLBACK_DEFINE(NULL, activity_input_listener, NULL);
