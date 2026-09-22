@@ -34,6 +34,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/pm/device.h>
 
+#include <zmk/activity.h>
 #include <zmk/endpoints.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/endpoint_changed.h>
@@ -220,7 +221,17 @@ ZMK_SUBSCRIPTION(daisy_tp_power, daisy_touchpad_update_state_changed);
 static void tp_boot_follow(struct k_work *work) { k_work_submit(&tp_follow_work); }
 static K_WORK_DELAYABLE_DEFINE(tp_boot_follow_work, tp_boot_follow);
 
+/* The passthroughs forward the pad's reports straight to USB/BLE, so they
+ * reach neither ZMK's input subsystem nor its event manager and activity.c's
+ * idle timer never sees them: a pointing-only user would idle the keyboard
+ * under their own finger. Count every report as activity instead. */
+static void tp_activity_cb(const struct device *dev, uint8_t report_id, const uint8_t *data,
+                           uint16_t len) {
+    zmk_activity_note();
+}
+
 static int tp_power_init(void) {
+    hid_touchpad_register_input_cb(touchpad, tp_activity_cb);
     k_work_schedule(&tp_boot_follow_work, K_MSEC(TP_BOOT_FOLLOW_DELAY_MS));
     return 0;
 }
