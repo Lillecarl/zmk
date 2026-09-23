@@ -4,6 +4,12 @@
  * SPDX-License-Identifier: MIT
  */
 
+/* Keep every behavior node, not just the ones the keymap references, so
+ * ZMK Studio can assign them at runtime (what the upstream
+ * studio-rpc-usb-uart snippet does via DTS_EXTRA_CPPFLAGS; snippets don't
+ * work under sysbuild). Must precede the first behaviors.dtsi include. */
+#define ZMK_BEHAVIORS_KEEP_ALL
+
 #include "daisy.dtsi"
 
 #include <behaviors.dtsi>
@@ -13,6 +19,7 @@
 / {
     chosen {
         zmk,physical-layout = &matrix_physical_layout;
+        zmk,studio-rpc-uart = &studio_cdc_acm;
     };
 
     /* Second USB HID interface for the touchpad passthrough. Only
@@ -58,5 +65,14 @@
             tap-ms = <1>;
             bindings = <&out OUT_BLE &bt BT_CLR>;
         )
+    };
+};
+
+/* ZMK Studio RPC over its own CDC-ACM port, next to the MCUmgr one the
+ * board overlays add. */
+&zephyr_udc0 {
+    studio_cdc_acm: studio_cdc_acm {
+        compatible = "zephyr,cdc-acm-uart";
+        label = "Daisy Studio";
     };
 };

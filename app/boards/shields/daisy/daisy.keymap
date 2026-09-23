@@ -28,6 +28,7 @@
 // | FN + U    | USB Output  |
 // | FN + B    | BLE Output  |
 // | FN + C    | Clear BT    |
+// | FN + `    | Unlock ZMK Studio |
 // | Win held + E+T chord | Enable Touchpad  |
 // | Win held + D+T chord | Disable Touchpad |
 / {
@@ -166,7 +167,7 @@
                 // |       |     |     |      |      |                             |      |      | HOME   | PG UP  | END   |
                 // |                                                                                      | PG DN  |
                 &tog FNLK &kp F1 &kp F2   &kp F3   &kp F4   &kp F5   &kp F6   &kp F7   &kp F8   &kp F9    &kp F10   &kp F11   &kp F12   &kp INS
-                ______ &bt BT_SEL 0 &bt BT_SEL 1 &bt BT_SEL 2  &bt BT_SEL 3 ______   ______   ______   ______   ______    ______    ______    ______ &sys_reset
+                &studio_unlock &bt BT_SEL 0 &bt BT_SEL 1 &bt BT_SEL 2  &bt BT_SEL 3 ______   ______   ______   ______   ______    ______    ______    ______ &sys_reset
                 ______    ______ ______   ______   ______   ______   ______   &out OUT_USB ______   ______   &kp PAUSE ______   ______   ______
                 ______    ______ ______   ______   ______   ______   ______   ______   &kp SLCK ______    ______    ______    ______
                 ______           ______   ______   &bt BT_CLR ______ &out OUT_BLE ______   ______   ______    ______    ______    ______
@@ -214,7 +215,7 @@
                 // |       |     |     |      |      |                             |      |      | HOME   | PG UP  | END   |
                 // |                                                                                      | PG DN  |
                 &tog FNLK &kp C_MUTE &kp C_VOL_DN &kp C_VOL_UP &kp C_PREV &kp C_PP &kp C_NEXT &kp C_AC_SEARCH &mic_mute &disp &emoji &kp PSCRN &kp C_AL_CCC &kp DEL
-                ______ &bt BT_SEL 0 &bt BT_SEL 1 &bt BT_SEL 2  &bt BT_SEL 3 ______   ______   ______   ______   ______    ______    ______    ______ &sys_reset
+                &studio_unlock &bt BT_SEL 0 &bt BT_SEL 1 &bt BT_SEL 2  &bt BT_SEL 3 ______   ______   ______   ______   ______    ______    ______    ______ &sys_reset
                 ______    ______ ______   ______   ______   ______   ______   &out OUT_USB ______   ______   &kp PAUSE ______   ______   ______
                 ______    ______ ______   ______   ______   ______   ______   ______   &kp SLCK ______    ______    ______    ______
                 ______           ______   ______   &bt BT_CLR ______ &out OUT_BLE ______   ______   ______    ______    ______    ______
