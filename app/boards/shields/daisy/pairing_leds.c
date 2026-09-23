@@ -2,9 +2,13 @@
 #include <zephyr/drivers/led.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zmk/activity.h>
 #include <zmk/ble.h>
 #include <zmk/event_manager.h>
+#include <zmk/events/activity_state_changed.h>
 #include <zmk/events/ble_active_profile_changed.h>
+#include <zmk/events/usb_conn_state_changed.h>
+#include <zmk/usb.h>
 
 #include "protocol_switch.h"
 
@@ -28,7 +32,9 @@ LOG_MODULE_REGISTER(daisy_pairing_leds, LOG_LEVEL_INF);
  *   connected             -> solid on
  *   open (nothing paired)  -> fast blink (500 ms)
  *   paired, not connected  -> slow blink (1500 ms)
- * Every other profile's LED is off.
+ * Every other profile's LED is off. Idle on battery (ZMK_ACTIVITY_IDLE, no
+ * cable) the active LED goes dark too, except while the profile is still
+ * waiting for its first pairing -- see refresh_pairing_leds().
  *
  * This is the pairing-LED slice of the (unbuilt) pmic.c reference, with the
  * on/off led_on/led_off calls replaced by 50%-duty led_set_brightness. It
@@ -140,6 +146,19 @@ static void refresh_pairing_leds(void)
         return;
     }
 
+    /* Idle on battery: a white LED held at 50 % duty is the largest idle draw
+     * on the board, and nobody is looking at it. Stay dark and let the ACTIVE
+     * edge refresh us. A profile still waiting for its first pairing keeps its
+     * fast blink -- the user is at the other machine's Bluetooth settings, not
+     * touching this keyboard -- until ble.c closes the pairing window, at which
+     * point blink_handler's zmk_ble_adv_enabled_get() check stops it. On a
+     * cable there is nothing to save, so leave it lit (the indicator_leds.c
+     * rule). */
+    if (zmk_activity_get_state() != ZMK_ACTIVITY_ACTIVE && !zmk_usb_is_powered() &&
+        !zmk_ble_active_profile_is_open()) {
+        return;
+    }
+
     int active = zmk_ble_active_profile_index();
 
     for (uint32_t i = 0; i < NUM_PAIRING_LEDS && i < ZMK_BLE_PROFILE_COUNT; i++) {
@@ -168,14 +187,17 @@ static void refresh_pairing_leds(void)
 
 static int pairing_leds_listener(const zmk_event_t *eh)
 {
-    if (as_zmk_ble_active_profile_changed(eh)) {
-        refresh_pairing_leds();
-    }
+    /* Any of the three inputs to refresh_pairing_leds() changed. */
+    refresh_pairing_leds();
     return 0;
 }
 
 ZMK_LISTENER(daisy_pairing_leds, pairing_leds_listener);
 ZMK_SUBSCRIPTION(daisy_pairing_leds, zmk_ble_active_profile_changed);
+ZMK_SUBSCRIPTION(daisy_pairing_leds, zmk_activity_state_changed);
+/* The idle rule keeps the LED lit on a cable; an unplug while idle must be
+ * able to turn it off without waiting for the next activity edge. */
+ZMK_SUBSCRIPTION(daisy_pairing_leds, zmk_usb_conn_state_changed);
 
 static int pairing_leds_init(void)
 {
