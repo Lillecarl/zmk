@@ -33,6 +33,7 @@
 #include <zephyr/app_version.h>
 
 #include <zmk/activity.h>
+#include <zmk/battery.h>
 #include <zmk/endpoints.h>
 #include <zmk/hid.h>
 #include <zmk/keymap.h>
@@ -429,6 +430,21 @@ static uint8_t handle_battery_current(uint8_t *payload, uint8_t *out_len) {
     int16_t ma = (int16_t)(val.val1 * 1000 + val.val2 / 1000);
     sys_put_le16((uint16_t)ma, payload);
     *out_len = sizeof(ma);
+    return DAISY_FACTORY_OK;
+#endif
+}
+
+/* The keyboard's own state-of-charge estimate, as a percentage. This is the
+ * number the keyboard reports over the BLE Battery Service, so a host, the
+ * dongle and this command all agree. It is ZMK's cached value from its
+ * periodic voltage sample (battery.c), not a fresh ADC read: use
+ * BATTERY_VOLTAGE for that. */
+static uint8_t handle_battery_level(uint8_t *payload, uint8_t *out_len) {
+#if !IS_ENABLED(CONFIG_ZMK_BATTERY_REPORTING)
+    return DAISY_FACTORY_ERR_UNSUPPORTED;
+#else
+    payload[0] = zmk_battery_state_of_charge();
+    *out_len = 1;
     return DAISY_FACTORY_OK;
 #endif
 }
@@ -1814,6 +1830,9 @@ static void process_work_handler(struct k_work *work) {
         break;
     case DAISY_FACTORY_CMD_BATTERY_CURRENT:
         status = handle_battery_current(payload, &payload_len);
+        break;
+    case DAISY_FACTORY_CMD_BATTERY_LEVEL:
+        status = handle_battery_level(payload, &payload_len);
         break;
     case DAISY_FACTORY_CMD_CHARGING_SET:
         status = handle_charging_set(&req_buf[DAISY_FACTORY_OFF_PAYLOAD],

@@ -78,6 +78,12 @@ enum daisy_factory_cmd {
     DAISY_FACTORY_CMD_BATTERY_TEMP = 0x11,    /* -> i16 hundredths of degC, LE */
     DAISY_FACTORY_CMD_BATTERY_VOLTAGE = 0x12, /* -> u16 millivolts, LE */
     DAISY_FACTORY_CMD_BATTERY_CURRENT = 0x13, /* -> i16 milliamps (signed: + charge), LE */
+    /* State of charge as the keyboard itself reports it (BLE Battery Service,
+     * touchpad-update SOC gate): ZMK's cached estimate from its periodic
+     * voltage sample, not a fresh measurement. Refreshed every
+     * CONFIG_ZMK_BATTERY_REPORT_INTERVAL seconds while the keyboard is
+     * active; paused while idle. */
+    DAISY_FACTORY_CMD_BATTERY_LEVEL = 0x14, /* -> u8 percent 0-100 */
 
     /* group 0x2: charging */
     DAISY_FACTORY_CMD_CHARGING_SET = 0x20, /* payload: [enable u8 (0=stop, 1=start)] */
