@@ -68,8 +68,7 @@
     };
 };
 
-/* ZMK Studio RPC over its own CDC-ACM port, next to the MCUmgr one the
- * board overlays add. */
+/* ZMK Studio RPC over its own CDC-ACM port. */
 &zephyr_udc0 {
     studio_cdc_acm: studio_cdc_acm {
         compatible = "zephyr,cdc-acm-uart";

@@ -4,7 +4,6 @@
     chosen {
         zmk,keyboard-hid = &hid_dev_0;
         zephyr,boot-mode = &boot_mode0;
-        zephyr,uart-mcumgr = &mcumgr_cdc_acm;
     };
 
     hid_dev_0: hid_dev_0 {
@@ -31,13 +30,6 @@
         compatible = "zephyr,retention";
         status = "okay";
         reg = <0x0 0x1>;
-    };
-};
-
-&zephyr_udc0 {
-    mcumgr_cdc_acm: mcumgr_cdc_acm {
-        compatible = "zephyr,cdc-acm-uart";
-        label = "Daisy MCUmgr";
     };
 };
 
