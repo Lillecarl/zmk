@@ -155,8 +155,8 @@
         fn_layer {
             display-name = "FN Layer";
             bindings = <
-		&trans
-                // &bootloader &trans
+                // Fn + pairing button: reboot into the MCUboot recovery bootloader.
+                &bootloader
                 // &trans &trans
                 // ---------------------------------------------------------------------------------------------------------
                 // | FNLK |  F1 |  F2 |  F3  |  F4  |  F5  |  F6  |  F7   |  F8   |  F9  |  F10  |  F11  |  F12  |  INS    |
@@ -203,8 +203,8 @@
         fm_layer {
             display-name = "FM Layer (Temp FN unlock)";
             bindings = <
-		&trans
-                // &bootloader &trans
+                // Fn + pairing button: reboot into the MCUboot recovery bootloader.
+                &bootloader
                 // &trans &trans
                 // ---------------------------------------------------------------------------------------------------------
                 // | FNLK |Mute |Prev |Next  |Prev  |Play  | Next |Search |MicMute|Displ |Airplne|Print  | Media |  DEL    |
