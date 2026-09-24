@@ -42,6 +42,14 @@
  *
  * VBUS present at any point resets all of it -- a charging pack is not
  * over-discharging, and ship mode is refused while plugged in anyway.
+ *
+ * Factory mode (FACTORY_MODE_SET) switches to a fast path: one sample at or
+ * below the cutoff is enough, polled every
+ * CONFIG_DAISY_BATTERY_CUTOFF_FACTORY_POLL_MS. The sag argument above is
+ * about a pack under BLE/backlight load; on the line the operator's bench
+ * supply is stepped below the cutoff on purpose and a 15 s wait per unit is
+ * just test time. Factory mode is RAM-only, so a reboot restores the slow
+ * path.
  */
 
 #include <zephyr/device.h>
@@ -55,6 +63,14 @@
 #include <zmk/events/usb_conn_state_changed.h>
 
 #include "pmic_ship.h"
+
+#if IS_ENABLED(CONFIG_DAISY_FACTORY)
+#include "factory_mode_changed.h"
+#include "factory_state.h"
+#else
+/* No factory interface built -> factory mode can never be active. */
+static inline bool daisy_factory_mode_active(void) { return false; }
+#endif
 
 LOG_MODULE_REGISTER(daisy_battery_cutoff, LOG_LEVEL_INF);
 
@@ -73,6 +89,19 @@ static const struct device *const charger = DEVICE_DT_GET(DT_NODELABEL(npm1300_c
 #define HYSTERESIS_MV  CONFIG_DAISY_BATTERY_CUTOFF_HYSTERESIS_MV
 #define POLL_SECONDS   CONFIG_DAISY_BATTERY_CUTOFF_POLL_SEC
 #define CUTOFF_SAMPLES CONFIG_DAISY_BATTERY_CUTOFF_CONSECUTIVE
+
+#if IS_ENABLED(CONFIG_DAISY_FACTORY)
+#define FACTORY_POLL_MS CONFIG_DAISY_BATTERY_CUTOFF_FACTORY_POLL_MS
+#else
+#define FACTORY_POLL_MS (POLL_SECONDS * 1000)
+#endif
+
+/* Factory mode: act on the first sample, poll fast. See the header comment. */
+static int samples_required(void) { return daisy_factory_mode_active() ? 1 : CUTOFF_SAMPLES; }
+
+static k_timeout_t poll_period(void) {
+    return daisy_factory_mode_active() ? K_MSEC(FACTORY_POLL_MS) : K_SECONDS(POLL_SECONDS);
+}
 
 BUILD_ASSERT(CUTOFF_MV < WARN_MV, "cutoff must be below the warn threshold");
 BUILD_ASSERT(WARN_MV <= SHED_MV, "warn must not be above the backlight-shed threshold");
@@ -249,15 +278,23 @@ static void cutoff_work_handler(struct k_work *work) {
         goto resched;
     }
 
+    const int required = samples_required();
+
     cutoff_samples++;
     LOG_WRN("VBAT %d mV <= cutoff %d mV (%d/%d consecutive)", vbat_mv, CUTOFF_MV, cutoff_samples,
-            CUTOFF_SAMPLES);
-    if (cutoff_samples < CUTOFF_SAMPLES) {
+            required);
+    if (cutoff_samples < required) {
         goto resched;
     }
 
-    LOG_ERR("VBAT held at/below %d mV for %d s; entering ship mode to stop discharging the pack",
-            CUTOFF_MV, CUTOFF_SAMPLES * POLL_SECONDS);
+    if (required == 1) {
+        LOG_ERR("VBAT %d mV <= %d mV in factory mode; entering ship mode now", vbat_mv,
+                CUTOFF_MV);
+    } else {
+        LOG_ERR("VBAT held at/below %d mV for %d s; entering ship mode to stop discharging the "
+                "pack",
+                CUTOFF_MV, required * POLL_SECONDS);
+    }
     /* Solid red on the way out, so a user watching sees the reason. It costs
      * nothing: the rail is about to be cut. */
     warn_set(false);
@@ -268,7 +305,7 @@ static void cutoff_work_handler(struct k_work *work) {
         LOG_ERR("ship request failed: %d; will retry next poll", rc);
         /* Back off one sample so the next poll retries immediately rather
          * than restarting the whole countdown. */
-        cutoff_samples = CUTOFF_SAMPLES - 1;
+        cutoff_samples = required - 1;
         set_red(false);
         warn_set(true);
         goto resched;
@@ -276,32 +313,49 @@ static void cutoff_work_handler(struct k_work *work) {
     return;
 
 resched:
-    k_work_reschedule(&cutoff_work, K_SECONDS(POLL_SECONDS));
+    k_work_reschedule(&cutoff_work, poll_period());
 }
 
 /* A plug-in must clear the warning immediately rather than up to a poll
  * period later: charging_led.c flashes its own color on the same LED at that
  * moment, and a stale low-battery blink underneath it reads as a fault. */
-static int cutoff_usb_listener(const zmk_event_t *eh) {
-    if (!as_zmk_usb_conn_state_changed(eh)) {
+static int cutoff_event_listener(const zmk_event_t *eh) {
+    if (as_zmk_usb_conn_state_changed(eh)) {
+        if (!daisy_pmic_ship_pending()) {
+            reset_state();
+            k_work_reschedule(&cutoff_work, poll_period());
+        }
         return 0;
     }
-    if (!daisy_pmic_ship_pending()) {
-        reset_state();
-        k_work_reschedule(&cutoff_work, K_SECONDS(POLL_SECONDS));
+#if IS_ENABLED(CONFIG_DAISY_FACTORY)
+    /* Entering or leaving factory mode changes the poll cadence and the
+     * sample requirement; re-arm now rather than after the pending (slow)
+     * period expires. Zeroing the count keeps a partial slow-path countdown
+     * from carrying into the fast path and vice versa. */
+    if (as_daisy_factory_mode_changed(eh)) {
+        if (!daisy_pmic_ship_pending()) {
+            cutoff_samples = 0;
+            k_work_reschedule(&cutoff_work, poll_period());
+        }
+        return 0;
     }
+#endif
     return 0;
 }
 
-ZMK_LISTENER(daisy_battery_cutoff, cutoff_usb_listener);
+ZMK_LISTENER(daisy_battery_cutoff, cutoff_event_listener);
 ZMK_SUBSCRIPTION(daisy_battery_cutoff, zmk_usb_conn_state_changed);
+#if IS_ENABLED(CONFIG_DAISY_FACTORY)
+ZMK_SUBSCRIPTION(daisy_battery_cutoff, daisy_factory_mode_changed);
+#endif
 
 static int cutoff_init(void) {
     /* One poll period of grace: the charger's first VBAT reading after boot
      * is taken under the inrush of everything else initializing. */
-    k_work_reschedule(&cutoff_work, K_SECONDS(POLL_SECONDS));
-    LOG_INF("low-battery cutoff armed: shed %d mV, warn %d mV, cutoff %d mV x%d @ %d s", SHED_MV,
-            WARN_MV, CUTOFF_MV, CUTOFF_SAMPLES, POLL_SECONDS);
+    k_work_reschedule(&cutoff_work, poll_period());
+    LOG_INF("low-battery cutoff armed: shed %d mV, warn %d mV, cutoff %d mV x%d @ %d s (factory: "
+            "x1 @ %d ms)",
+            SHED_MV, WARN_MV, CUTOFF_MV, CUTOFF_SAMPLES, POLL_SECONDS, FACTORY_POLL_MS);
     return 0;
 }
 SYS_INIT(cutoff_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);

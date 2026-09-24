@@ -176,6 +176,20 @@ config DAISY_BATTERY_CUTOFF_POLL_SEC
       with DAISY_BATTERY_CUTOFF_CONSECUTIVE this sets how long VBAT must stay
       below the cutoff before the board turns itself off: 5 s x 3 = 15 s.
 
+config DAISY_BATTERY_CUTOFF_FACTORY_POLL_MS
+    int "VBAT poll interval while in factory mode, milliseconds"
+    depends on DAISY_FACTORY
+    default 1000
+    range 200 5000
+    help
+      While factory mode is active (FACTORY_MODE_SET) the consecutive-sample
+      requirement is dropped -- the first reading at or below the cutoff
+      enters ship mode -- and VBAT is polled at this rate instead of
+      DAISY_BATTERY_CUTOFF_POLL_SEC, so a bench supply stepped below the
+      cutoff shuts the board off within about one period rather than 15 s.
+      The load-sag rationale for the slow path does not apply: on the line
+      the supply is the operator's, not a pack under BLE load.
+
 endif # DAISY_BATTERY_CUTOFF
 
 config ZMK_KEYBOARD_NAME
