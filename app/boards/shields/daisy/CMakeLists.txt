@@ -15,6 +15,9 @@ endif()
 # Crash breadcrumb (fatal-error handler + __noinit record). Not factory-only:
 # the record is also what makes RESET_ON_FATAL_ERROR reboots diagnosable.
 zephyr_library_sources(crash_info.c)
+# Clear the cumulative RESETREAS register at boot so a stale wake-from-OFF bit
+# cannot veto MCUboot's hold-the-pairing-button recovery entry on later resets.
+zephyr_library_sources(reset_reason.c)
 if(CONFIG_ZMK_HID_TOUCHPAD)
   zephyr_library_sources(touchpad_power.c)
   zephyr_library_sources(behavior_touchpad_power.c)
