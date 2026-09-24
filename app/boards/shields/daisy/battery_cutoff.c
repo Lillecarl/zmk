@@ -34,8 +34,11 @@
  * The consecutive-sample requirement is load-bearing, not belt-and-braces:
  * VBAT sags hard on BLE TX bursts and with the backlight on, so a single
  * sample below 3.2 V can happen with plenty of charge left. At the default
- * 60 s poll x 5 samples the cell has to hold below the threshold for ~5
- * minutes before the board cuts off.
+ * 5 s poll x 3 samples the cell has to hold below the threshold for 15 s
+ * before the board turns itself off. (It was 60 s x 5 = 5 minutes; a bench
+ * test stepping the supply 3.2 -> 3.0 -> 2.8 V never gave that a chance and
+ * a real pack near the floor is discharging into its protection trip the
+ * whole time. 15 s still outlasts any TX burst or key-press sag.)
  *
  * VBUS present at any point resets all of it -- a charging pack is not
  * over-discharging, and ship mode is refused while plugged in anyway.

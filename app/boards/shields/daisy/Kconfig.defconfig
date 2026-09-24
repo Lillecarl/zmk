@@ -159,18 +159,22 @@ config DAISY_BATTERY_CUTOFF_HYSTERESIS_MV
 
 config DAISY_BATTERY_CUTOFF_CONSECUTIVE
     int "Consecutive samples below the cutoff before acting"
-    default 5
+    default 3
     range 2 60
     help
       VBAT sags hard on BLE TX bursts and with the backlight on, so a single
       reading below the threshold can happen with charge to spare. Requiring
       several consecutive polls turns the check into a sustained-undervoltage
-      test. At the default poll interval this is ~5 minutes.
+      test. At the default poll interval this is 15 seconds.
 
 config DAISY_BATTERY_CUTOFF_POLL_SEC
     int "VBAT poll interval, seconds"
-    default 60
+    default 5
     range 5 600
+    help
+      One charger read per poll; at 5 s that is a negligible load. Together
+      with DAISY_BATTERY_CUTOFF_CONSECUTIVE this sets how long VBAT must stay
+      below the cutoff before the board turns itself off: 5 s x 3 = 15 s.
 
 endif # DAISY_BATTERY_CUTOFF
 

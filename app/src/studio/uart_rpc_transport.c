@@ -135,6 +135,12 @@ static void serial_cb(const struct device *dev, void *user_data) {
 
             ring_buf_get_finish(tx_buf, MAX(sent, 0));
         }
+
+        /* Nothing left to send: tx_notify() re-enables this. Leaving TX IRQs
+         * on makes the USB-next CDC-ACM driver resubmit this callback forever
+         * (it fires whenever its TX FIFO has space), which on its cooperative
+         * work queue starves every preemptible thread. */
+        uart_irq_tx_disable(uart_dev);
     }
 }
 
