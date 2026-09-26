@@ -45,7 +45,7 @@ manifest:
       path: modules/msgs/zmk-studio-messages
       remote: zmkfirmware
     - name: zephyr-hid-touchpad-module
-      revision: 60606eb0e5df3e994766d7b9ac3f58eaa72a0ecd
+      revision: 7f0d1228118918a342bcf37117e8bbf604f32446
       remote: FrameworkComputer
   group-filter: [+optional]
   self:
