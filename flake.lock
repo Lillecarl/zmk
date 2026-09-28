@@ -191,11 +191,11 @@
     "zephyr-hid-touchpad-module-apple-mt": {
       "flake": false,
       "locked": {
-        "lastModified": 1790614599,
-        "narHash": "sha256-Z5vmXw4fD63kGVJZHnh4ssljic8hk7iuHGmRtMiG6SQ=",
+        "lastModified": 1790615986,
+        "narHash": "sha256-dDMHZn6eyWlJROlvwNzaq7//XKy8zJGD61IyTBwE8ms=",
         "owner": "Lillecarl",
         "repo": "zephyr-hid-touchpad-module",
-        "rev": "eac1375ae6ee371e4ffc86cd01c12408b6a03e9b",
+        "rev": "b1d21d3f54a11415897c01829d688ed6f58a1ca5",
         "type": "github"
       },
       "original": {

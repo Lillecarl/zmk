@@ -58,6 +58,10 @@
         touchpad-module-src = inputs.zephyr-hid-touchpad-module-apple-mt;
         extraConfFiles = [ "boards/shields/daisy/apple_mt.conf" ];
       };
+      daisy-ipad = callPackage ./default.nix {
+        touchpad-module-src = inputs.zephyr-hid-touchpad-module-apple-mt;
+        extraConfFiles = [ "boards/shields/daisy/ipad.conf" ];
+      };
     };
 
     lib.mkFirmware = { board, shield ? null }:
