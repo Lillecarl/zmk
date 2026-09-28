@@ -4,6 +4,8 @@
 , touchpad-module-src
 , board ? "daisy"
 , shield ? "daisy"
+  # Kconfig fragments merged last, relative to app/.
+, extraConfFiles ? [ ]
 }:
 let
   manifest = lib.importTOML ./west2nix.toml;
@@ -25,8 +27,11 @@ let
 
   protobufPython = python312.withPackages (ps: [ ps.protobuf ps.grpcio-tools ]);
 
-  westBuildFlags = [ "-p" "-b" board ]
-    ++ lib.optionals (shield != null) [ "--" "-DSHIELD=${shield}" ];
+  westBuildFlags = [ "-p" "-b" board "--" ]
+    ++ lib.optionals (shield != null) [ "-DSHIELD=${shield}" ]
+    ++ lib.optionals (extraConfFiles != [ ]) [
+      "-DEXTRA_CONF_FILE=${lib.concatStringsSep ";" extraConfFiles}"
+    ];
 in
 stdenv.mkDerivation {
   pname = "zmk-${board}";

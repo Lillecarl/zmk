@@ -10,6 +10,10 @@
     zephyr-hid-touchpad-module.url = "git+ssh://git@github.com/FrameworkComputer/zephyr-hid-touchpad-module?ref=passthrough";
     zephyr-hid-touchpad-module.flake = false;
 
+    # The macOS trackpad prototype (daisy-apple-mt).
+    zephyr-hid-touchpad-module-apple-mt.url = "github:Lillecarl/zephyr-hid-touchpad-module/apple-mt";
+    zephyr-hid-touchpad-module-apple-mt.flake = false;
+
     zephyr-nix.url = "github:nix-community/zephyr-nix";
     zephyr-nix.inputs.nixpkgs.follows = "nixpkgs";
     zephyr-nix.inputs.zephyr.follows = "zephyr";
@@ -50,6 +54,10 @@
       default = callPackage ./default.nix {};
       xiao_ble = callPackage ./default.nix { board = "xiao_ble"; };
       nrf52840dk = callPackage ./default.nix { board = "nrf52840dk/nrf52840"; };
+      daisy-apple-mt = callPackage ./default.nix {
+        touchpad-module-src = inputs.zephyr-hid-touchpad-module-apple-mt;
+        extraConfFiles = [ "boards/shields/daisy/apple_mt.conf" ];
+      };
     };
 
     lib.mkFirmware = { board, shield ? null }:
